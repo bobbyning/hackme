@@ -278,6 +278,18 @@ func envIntMs(envKey string, fallback int) int {
 	return x
 }
 
+func envUint64(envKey string, fallback uint64) uint64 {
+	v := strings.TrimSpace(os.Getenv(envKey))
+	if v == "" {
+		return fallback
+	}
+	x, err := strconv.ParseUint(v, 10, 64)
+	if err != nil || x == 0 {
+		return fallback
+	}
+	return x
+}
+
 func newWorkerHTTPClient(timeout time.Duration) *http.Client {
 	if timeout < 5*time.Second {
 		timeout = 5 * time.Second
@@ -656,8 +668,8 @@ func main() {
 		token           = flag.String("token", strings.TrimSpace(os.Getenv("COORD_TOKEN")), "coordinator admin token")
 		workerID        = flag.String("worker", strings.TrimSpace(os.Getenv("WORKER_ID")), "worker id")
 		batch           = flag.Uint64("batch", 1<<22, "claim batch size")
-		gpuChunk        = flag.Uint64("gpu-chunk", 1<<22, "GPU chunk size per Search() call")
-		searchTimeoutMS = flag.Int("search-timeout-ms", 2500, "Search() timeout per GPU chunk (ms)")
+		gpuChunk        = flag.Uint64("gpu-chunk", envUint64("GPU_CHUNK", 1<<22), "GPU chunk size per Search() call (env GPU_CHUNK)")
+		searchTimeoutMS = flag.Int("search-timeout-ms", envIntMs("SEARCH_TIMEOUT_MS", 2500), "Search() timeout per GPU chunk (ms) (env SEARCH_TIMEOUT_MS)")
 		gpuBackend      = flag.String("gpu-backend", strings.TrimSpace(os.Getenv("HACKME_GPU_BACKEND")), "preferred GPU backend: auto|opencl|cuda")
 		gpuDevice       = flag.Int("gpu-device", -1, "preferred accelerator device index (-1 = auto)")
 		gpuDisable      = flag.Bool("gpu-disable", isTruthy(os.Getenv("HACKME_GPU_DISABLE")), "disable GPU and force CPU mode")
