@@ -39,7 +39,7 @@ func TestEnvIntMs(t *testing.T) {
 		{name: "unset returns fallback", set: "", want: 2500},
 		{name: "plain value", set: "SEARCH_TIMEOUT_TEST", val: "12000", want: 12000},
 		{name: "whitespace trimmed", set: "SEARCH_TIMEOUT_TEST", val: " 6000 ", want: 6000},
-		{name: "zero allowed (explicit no sleep)", set: "SEARCH_TIMEOUT_TEST", val: "0", want: 0},
+		{name: "zero allowed (cooldown semantics: no sleep)", set: "SEARCH_TIMEOUT_TEST", val: "0", want: 0},
 		{name: "negative rejected", set: "SEARCH_TIMEOUT_TEST", val: "-5", want: 2500},
 		{name: "garbage rejected", set: "SEARCH_TIMEOUT_TEST", val: "2.5s", want: 2500},
 	}
@@ -50,6 +50,34 @@ func TestEnvIntMs(t *testing.T) {
 			}
 			if got := envIntMs("SEARCH_TIMEOUT_TEST", 2500); got != tc.want {
 				t.Fatalf("envIntMs = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEnvIntPositive(t *testing.T) {
+	cases := []struct {
+		name string
+		set  string
+		val  string
+		want int
+	}{
+		{name: "unset returns fallback", set: "", want: 2500},
+		{name: "plain value", set: "SEARCH_TIMEOUT_TEST", val: "12000", want: 12000},
+		{name: "whitespace trimmed", set: "SEARCH_TIMEOUT_TEST", val: " 6000 ", want: 6000},
+		// Regression: a zero GPU search timeout is an already-expired context, so
+		// every GPU Search would fail and silently fall back to CPU.
+		{name: "zero rejected (expired context guard)", set: "SEARCH_TIMEOUT_TEST", val: "0", want: 2500},
+		{name: "negative rejected", set: "SEARCH_TIMEOUT_TEST", val: "-5", want: 2500},
+		{name: "garbage rejected", set: "SEARCH_TIMEOUT_TEST", val: "2.5s", want: 2500},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.set != "" {
+				t.Setenv(tc.set, tc.val)
+			}
+			if got := envIntPositive("SEARCH_TIMEOUT_TEST", 2500); got != tc.want {
+				t.Fatalf("envIntPositive = %d, want %d", got, tc.want)
 			}
 		})
 	}

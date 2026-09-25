@@ -278,6 +278,21 @@ func envIntMs(envKey string, fallback int) int {
 	return x
 }
 
+// envIntPositive is envIntMs for values where zero is invalid (e.g. the GPU
+// search timeout: a zero-duration context is already expired, so every GPU
+// Search would fail and silently fall back to CPU).
+func envIntPositive(envKey string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(envKey))
+	if v == "" {
+		return fallback
+	}
+	x, err := strconv.Atoi(v)
+	if err != nil || x <= 0 {
+		return fallback
+	}
+	return x
+}
+
 func envUint64(envKey string, fallback uint64) uint64 {
 	v := strings.TrimSpace(os.Getenv(envKey))
 	if v == "" {
@@ -669,7 +684,7 @@ func main() {
 		workerID        = flag.String("worker", strings.TrimSpace(os.Getenv("WORKER_ID")), "worker id")
 		batch           = flag.Uint64("batch", 1<<22, "claim batch size")
 		gpuChunk        = flag.Uint64("gpu-chunk", envUint64("GPU_CHUNK", 1<<22), "GPU chunk size per Search() call (env GPU_CHUNK)")
-		searchTimeoutMS = flag.Int("search-timeout-ms", envIntMs("SEARCH_TIMEOUT_MS", 2500), "Search() timeout per GPU chunk (ms) (env SEARCH_TIMEOUT_MS)")
+		searchTimeoutMS = flag.Int("search-timeout-ms", envIntPositive("SEARCH_TIMEOUT_MS", 2500), "Search() timeout per GPU chunk (ms) (env SEARCH_TIMEOUT_MS)")
 		gpuBackend      = flag.String("gpu-backend", strings.TrimSpace(os.Getenv("HACKME_GPU_BACKEND")), "preferred GPU backend: auto|opencl|cuda")
 		gpuDevice       = flag.Int("gpu-device", -1, "preferred accelerator device index (-1 = auto)")
 		gpuDisable      = flag.Bool("gpu-disable", isTruthy(os.Getenv("HACKME_GPU_DISABLE")), "disable GPU and force CPU mode")
