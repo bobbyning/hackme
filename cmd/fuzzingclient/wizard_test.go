@@ -1,12 +1,30 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"hackme/internal/fuzzengine"
 	"hackme/internal/fuzzingcli"
 )
+
+// requireSecurityWasm skips tests that depend on the rust/wasm toolchain pack when
+// the artifact has not been built AND rustc is unavailable, so a Go-only checkout
+// gets a clear signal instead of hard failures (same convention as internal/sandbox
+// and tools/fluxtap_wasm_compare). With rustc on PATH the pre-existing behavior is
+// kept: pack tests self-build via buildPackWasm, explicit-path tests fail loudly.
+func requireSecurityWasm(t *testing.T, name string) string {
+	t.Helper()
+	p := filepath.Join("..", "..", "tasks", "artifacts", "security", name)
+	if _, err := os.Stat(p); err != nil {
+		if _, lerr := exec.LookPath("rustc"); lerr != nil {
+			t.Skipf("security wasm %s not built and rustc unavailable (run scripts/build_security_task_pack.sh; toolchain: docs/RUST_CPP_TASKS_QUICKSTART.md): %v", name, err)
+		}
+	}
+	return p
+}
 
 func TestWizardRefusesPublicBase(t *testing.T) {
 	if fuzzingcli.IsLoopbackBase("https://hackme.tech") {
@@ -19,7 +37,7 @@ func TestWizardRefusesPublicBase(t *testing.T) {
 }
 
 func TestWizardDryRunScanPackage(t *testing.T) {
-	wasm := filepath.Join("..", "..", "tasks", "artifacts", "security", "rust_script_push_bounds_guard.wasm")
+	wasm := requireSecurityWasm(t, "rust_script_push_bounds_guard.wasm")
 	m, err := doWizardDryRun("scan", wasm)
 	if err != nil {
 		t.Fatal(err)
@@ -40,6 +58,7 @@ func TestWizardDryRunScanPackage(t *testing.T) {
 }
 
 func TestWizardDryRunPackSecrets(t *testing.T) {
+	requireSecurityWasm(t, "rust_tracefuse_detector_bytes_guard.wasm")
 	m, err := doWizardDryRunPack("audit", "secrets", "")
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +81,7 @@ func TestWizardDryRunPackSecrets(t *testing.T) {
 }
 
 func TestWizardDryRunPackagesDiffer(t *testing.T) {
-	wasm := filepath.Join("..", "..", "tasks", "artifacts", "security", "rust_script_push_bounds_guard.wasm")
+	wasm := requireSecurityWasm(t, "rust_script_push_bounds_guard.wasm")
 	scan, err := doWizardDryRun("scan", wasm)
 	if err != nil {
 		t.Fatal(err)
