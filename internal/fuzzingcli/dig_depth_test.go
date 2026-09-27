@@ -66,16 +66,16 @@ func TestDigDepthProfile(t *testing.T) {
 
 func TestApplyDigGPUMutatorsWiresSegmentPath(t *testing.T) {
 	off := map[string]any{
-		"input_mode":     "bytes",
+		"input_mode":      "bytes",
 		"max_input_bytes": 128,
-		"exec_per_unit":  8,
-		"power_mut_cap":  8,
+		"exec_per_unit":   8,
+		"power_mut_cap":   8,
 	}
 	on := map[string]any{
-		"input_mode":     "bytes",
+		"input_mode":      "bytes",
 		"max_input_bytes": 128,
-		"exec_per_unit":  8,
-		"power_mut_cap":  8,
+		"exec_per_unit":   8,
+		"power_mut_cap":   8,
 	}
 	ApplyDigGPUMutators(on, true)
 	if !fuzzengine.DigGPUMutatorsEnabled(on) {

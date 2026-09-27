@@ -42,18 +42,12 @@ data/
 .env
 .env.*
 !.env.*.example
-.env.desktop
-.env.worker
 telegram_bot.env
-.env.telegram
 
 # Logs and desktop runtime
 logs/
 *.log
-
-# Toolchain caches (desktop installer downloads)
 .hackme-toolchains.env
-logs/desktop/
 
 # Release artifacts (build in CI / locally; publish via GitHub Releases)
 dist/
@@ -61,9 +55,13 @@ dist/
 # Reports and soak artifacts
 reports/
 
-# Editor / OS
+# Editor / OS / agent
 .idea/
 .vscode/
+.cursor/
+.deps/
+.cache/
+.wip/
 *.swp
 .DS_Store
 Thumbs.db
@@ -79,114 +77,100 @@ tasks/artifacts/
 .tmp-fuzz/
 tools/**/*_report.json
 tools/**/scratch/
-# Product briefs live on Desktop / docs — never commit root pitch MD
+
+# Product briefs / audit drafts at repo root (keep under Desktop / Documents)
 /HackMe_Fuzz_*.md
 /*_Prod_vs_Local.md
 /FUZZ_V2_*.md
+/*_AUDIT.md
+/POST*_DIG.md
+/REPO_CLEANUP_REPORT.md
 
 # Python bytecode
 __pycache__/
 *.pyc
 
-# Local WIP / scratch trees
-.wip/
+# Site report WIP + brand uploads — see after !web/site/** below
 
-# Root audit / dig drafts (keep under ~/Documents — never commit)
-/*_AUDIT.md
-/POST*_DIG.md
-/REPO_CLEANUP_REPORT.md
-
-# Site report WIP pages
-web/site/reports/**/*-wip.html
-
-# Misc local scratch
+# Misc local scratch / archives
 cuda-keyring*.deb
 /workerpoh-opencl
-# libFuzzer / sanitizer crash artifacts (never commit)
 /crash-*
 crash-*
-.cache/
-text123.txt
 tmp/
-GET
-Untitled
 backups/
 *.tar.gz
 *.zip
 !web/site/**
+GET
+Untitled
+text123.txt
 
-# Draft assets under site (must come after !web/site/**)
+# Re-exclude site drafts/uploads after !web/site/** re-include
+web/site/reports/**/*-wip.html
+web/site/assets/social/
 web/site/assets/*-draft.json
 
 # Social/marketing drafts (publish via site news + Telegram bot — not in repo)
 docs/social/
 docs/TELEGRAM_POST_*
+docs/TELEGRAM_SECURITY_REWARDS_PIN.txt
 docs/BITCOINTALK_*
 docs/SOCIAL_*.md
 docs/FUZZ_*_SOCIAL.md
 docs/SOCIAL_POSTING_CHECKLIST.md
 docs/SCREENSHOT_AND_POST_CHECKLIST.md
 docs/NEWS_POST_*.md
-docs/TELEGRAM_SECURITY_REWARDS_PIN.txt
-docs/archive/TELEGRAM_POST_*
 docs/BOUNTY_*_STATUS.md
+docs/archive/TELEGRAM_POST_*
+docs/ops/*SOCIAL*.md
 
-# Social drafts under reports (Twitter/Discord/TG/BCT copy packs)
-reports/**/DAY*_TWITTER*.txt
-reports/**/DAY*_TELEGRAM*.txt
-reports/**/DAY*_DISCORD*.txt
-reports/**/DAY*_BITCOINTALK*.txt
-reports/**/DAY*_FINALE_CHECKLIST.md
-reports/**/*_SOCIAL.md
-reports/**/*_TWITTER_THREAD.txt
-
-# Accidental Cursor/agent terminal dumps saved under scripts/ops (never commit)
+# Accidental Cursor/agent dumps + local-only ops families (details in scripts/.gitignore)
 scripts/ops/pool_max_checks.sh
-scripts/ops/fix_desktop_marketplace.sh
 scripts/ops/fix*_marketplace.*
-scripts/ops/run_oss_cve_watch_day67_marathon.sh
-
-# Local operator away / overnight / auto-publish (keep on disk; not GitHub)
-scripts/ops/away_*.sh
-scripts/ops/install_away_ops_vps.sh
-scripts/ops/pool_away_watch_once.sh
-scripts/ops/week_ops_*.sh
-scripts/ops/install_week_ops_metrics_vps.sh
-scripts/ops/overnight_pool_watch_until_8am.sh
-scripts/ops/final_confidence_overnight.sh
-scripts/ops/run_oss_cve_*marathon*.sh
-scripts/ops/run_oss_cve_watch_*autopublish*.sh
-scripts/ops/run_oss_cve_watch_day_chain_autopublish.sh
-scripts/ops/run_oss_cve_watch_overnight*.sh
-scripts/ops/build_oss_cve_watch_libheif_day_aggregate.sh
-scripts/ops/final_release_oneclick.sh
-scripts/ops/ideal_all_tests.sh
-scripts/ops/pool_finale_run.sh
-scripts/ops/pool_ideal_*.sh
-scripts/ops/start_local_ideal_miner.sh
-scripts/ops/windows_run_ideal_worker.ps1
-
-# Desktop-local ops drafts (promote to tracked scripts/ops/ when ready for GitHub)
-scripts/ops/_*.sh
-scripts/ops/_*.py
-!scripts/ops/_deploy_ssh_retry.sh
-!scripts/ops/_json_curl_helpers.sh
 scripts/ops/tools/
 scripts/vast/
 scripts/build_immunefi_pack.sh
 scripts/build_warppool_fuzz_pack.sh
 scripts/check_hms_market_invariants.sh
 
-# Local desktop test packs (not CI; tracked gates live under scripts/tests/hunt_* etc.)
-scripts/tests/coordinator_mega_stress.sh
-scripts/tests/coordinator_memory_leak_spec.sh
-scripts/tests/coordinator_stress.env
-scripts/tests/mega_stress.sh
+# Underscore drafts under ops (tracked helpers allowlisted in scripts/.gitignore)
+scripts/ops/_*.sh
+scripts/ops/_*.py
+!scripts/ops/_deploy_ssh_retry.sh
+!scripts/ops/_json_curl_helpers.sh
+
+# Away / overnight / ideal / marathon / watch day one-shots (keep on disk)
+scripts/ops/away_*.sh
+scripts/ops/week_ops_*.sh
+scripts/ops/*overnight*
+scripts/ops/*marathon*
+scripts/ops/*finale*
+scripts/ops/*oneclick*
+scripts/ops/ideal_*.sh
+scripts/ops/final_confidence_overnight.sh
+scripts/ops/final_release_oneclick.sh
+scripts/ops/pool_ideal_*.sh
+scripts/ops/pool_finale_*.sh
+scripts/ops/pool_away_*.sh
+scripts/ops/install_away_ops_vps.sh
+scripts/ops/install_week_ops_metrics_vps.sh
+scripts/ops/start_local_ideal_miner.sh
+scripts/ops/windows_run_ideal_worker.ps1
+scripts/ops/run_oss_cve_*marathon*.sh
+scripts/ops/run_oss_cve_watch_*.sh
+scripts/ops/run_oss_cve_obscure*.sh
+scripts/ops/build_oss_cve_watch_*.sh
+
+# Local desktop mega-test packs (tracked gates live under scripts/tests/hunt_* etc.)
+scripts/tests/*mega*
+scripts/tests/*ultimate*
+scripts/tests/*maximum*
 scripts/tests/load_mega_suite.sh
-scripts/tests/maximum_resilience_gate.sh
 scripts/tests/mock_miners_load.sh
 scripts/tests/public_release_mega_pack.sh
-scripts/tests/run_ultimate_validation.sh
+scripts/tests/coordinator_stress.env
+scripts/tests/coordinator_memory_leak_spec.sh
 scripts/tests/tools/coordinator_mega_stress.py
 scripts/tests/tools/coordinator_memory_leak_spec.py
 scripts/tests/tools/mega_stress_runner.py
@@ -195,26 +179,13 @@ scripts/tests/tools/mock_miners_pool.py
 # External bounty invariant suites (Foundry) — keep local, not core HackMe
 bounty-lab/
 
-# Local future-architecture planning (keep local, never push)
-# HMS lane: full spec + mocks under adapters/hms/ — commit only docs/HMS_PUBLIC_ROADMAP.md + site preview
+# HMS lane adapters: commit only docs/HMS_PUBLIC_ROADMAP.md + site preview
 adapters/
 scripts/ops/adapter_pack_smoke.sh
 docs/HUB_ADAPTER_ONBOARDING_CHECKLIST.md
 docs/HUB_ADAPTER_STATUS_TEMPLATE.md
-.cursor/
-.deps/
 
-# Brand upload assets for FB/Reddit/CG (local only — do not commit binaries)
-web/site/assets/social/
-
-# Local social drafts (never commit)
-docs/ops/*_SOCIAL.md
-docs/ops/*SOCIAL*.md
-
-# Local obscure Hunt ops + private disclosure (never push)
-scripts/ops/run_oss_cve_obscure*.sh
-logs/oss-obscure*
-logs/*obscure*
+# Local obscure Hunt hold / disclosure packs (never push)
 reports/oss-cve/hold-*/
 reports/oss-cve/obscure-loop-*/
 **/01_EMAIL.txt
