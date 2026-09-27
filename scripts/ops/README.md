@@ -1,6 +1,6 @@
 # `scripts/ops` — operator scripts (public repo)
 
-Production and CI-supported helpers only. **Lab / one-shot / marathon scripts stay on your disk** under the same paths but are listed in [`../.gitignore`](../.gitignore) and are **not** pushed to GitHub.
+Production and CI-supported helpers only. **Lab / one-shot / marathon scripts stay on your disk** under the same paths but are listed in [`../.gitignore`](../.gitignore) (prefix globs + allowlists) and are **not** pushed to GitHub.
 
 ## Supported (production / miners)
 
