@@ -3409,7 +3409,7 @@
 							<a id="btn-exchange-popout" href="https://exchange.hackme.tech/" target="_blank" rel="noopener noreferrer" class="text-[10px] px-2.5 py-1 rounded border border-matrix/35 text-matrix hover:bg-matrix/10 uppercase tracking-wider no-underline">Pop out</a>
 						</span>
 					</div>
-					<iframe id="exchange-spa-frame" title="HackMe Exchange paper desk" width="100%" height="100%" referrerpolicy="no-referrer" allow="clipboard-read; clipboard-write" style="width:100%;height:100%;min-width:0;border:1px solid rgba(0,209,255,0.22);border-radius:0.35rem;background:#05070d;"></iframe>
+					<iframe id="exchange-spa-frame" title="HackMe Exchange paper desk" width="100%" height="100%" referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-read; clipboard-write" style="width:100%;height:100%;min-width:0;border:1px solid rgba(0,209,255,0.22);border-radius:0.35rem;background:#05070d;"></iframe>
 				</div>
 			</main>
 		</div>
@@ -14760,11 +14760,17 @@
 			let spaOk = false;
 			let apiOk = false;
 			spaOk = await probeOriginReachable(origin);
-			try {
-				const hr = await fetch(EXCHANGE_API_HEALTH_DEFAULT, { method: 'GET', cache: 'no-store' });
-				apiOk = hr.ok;
-			} catch (_) {
-				apiOk = false;
+			// Prefer same-origin Vite proxy when local desk is embedded (avoids CORS noise).
+			const healthCandidates = [];
+			if (/127\.0\.0\.1:5199|localhost:5199|\[::1\]:5199/i.test(origin)) {
+				healthCandidates.push(origin.replace(/\/$/, '') + '/exchange-api/health');
+			}
+			healthCandidates.push(EXCHANGE_API_HEALTH_DEFAULT);
+			for (const url of healthCandidates) {
+				try {
+					const hr = await fetch(url, { method: 'GET', cache: 'no-store', mode: 'cors' });
+					if (hr.ok) { apiOk = true; break; }
+				} catch (_) { /* try next */ }
 			}
 			const local = /127\.0\.0\.1:5199|localhost:5199|\[::1\]:5199/i.test(origin);
 			if (spaOk && apiOk) setExchangeLabStatus(local ? 'local SPA + API up' : 'SPA + API up', 'ok');
@@ -15049,7 +15055,8 @@
 			try {
 				const frame = $('exchange-spa-frame');
 				if (!frame || !frame.contentWindow || ev.source !== frame.contentWindow) return;
-				if (ev.origin !== exchangeSpaOrigin()) return;
+				// Exact allowlist — do not trust exchangeSpaOrigin() alone (race / stale resolve).
+				if (!EXCHANGE_SPA_ORIGIN_ALLOW.includes(ev.origin)) return;
 				const d = ev.data;
 				if (!d || d.type !== 'hackme-exchange') return;
 				if (d.action === 'goto-tab' && typeof d.tab === 'string') {
