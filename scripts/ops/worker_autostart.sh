@@ -218,10 +218,7 @@ truthy() {
 
 detect_gpu_backend() {
   export HACKME_REPO_ROOT="${HACKME_REPO_ROOT:-$ROOT_DIR}"
-  if [[ -x "${ROOT_DIR}/scripts/ops/detect_gpu_backend.sh" ]]; then
-    bash "${ROOT_DIR}/scripts/ops/detect_gpu_backend.sh"
-    return 0
-  fi
+  # Honor explicit disable before autodetection (VMs / no OpenCL ICD).
   if truthy "${HACKME_GPU_DISABLE:-0}"; then
     echo "cpu"
     return 0
@@ -242,6 +239,10 @@ detect_gpu_backend() {
       echo "${HACKME_GPU_BACKEND}"
       return 0
     fi
+  fi
+  if [[ -x "${ROOT_DIR}/scripts/ops/detect_gpu_backend.sh" ]]; then
+    bash "${ROOT_DIR}/scripts/ops/detect_gpu_backend.sh"
+    return 0
   fi
   echo "cpu"
 }
