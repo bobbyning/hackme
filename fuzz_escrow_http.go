@@ -14,10 +14,10 @@ func writeFuzzEscrowFailed(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, chain.ErrFuzzWalletMissing):
 		writeAPIError(w, http.StatusPaymentRequired, "escrow_unavailable",
-			"local wallet not initialized (genesis required)", nil)
+			"local wallet not initialized — run POST /api/genesis on this node, then fund local spendable HMC (on-chain display is not auto-spendable for orders)", nil)
 	case errors.Is(err, chain.ErrFuzzInsufficientBalance):
 		writeAPIError(w, http.StatusPaymentRequired, "escrow_failed",
-			"insufficient wallet balance for escrow", nil)
+			"insufficient local spendable HMC for escrow (orders use balance_orders_spendable_hmc, not on-chain balance)", nil)
 	default:
 		// Surface stable validation messages (shards/budget floors) without sql driver leaks.
 		msg := "escrow open failed"

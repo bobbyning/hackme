@@ -18,19 +18,25 @@ There is **no** order-creation UI on hackme.tech (removed `/pool/developer`).
 
 ## Quick start
 
-1. Install/run `hackme-node` (desktop `.env` or VPS-style layout on your PC).
-2. Open dashboard → **Developer token** → **Issue** (or `hackme-fuzzing register --base http://127.0.0.1:8080 --save`).
-3. **Recommended (B2B final):**
+1. Install/run `hackme-node` (desktop `.env` or VPS-style layout on your PC) on `http://127.0.0.1:8080`.
+2. Ensure **local spendable HMC** (`GET /api/wallet` → `balance_orders_spendable_hmc`). On-chain display alone is not enough for escrow. Fresh installs get a local wallet via genesis; follower desktops must fund the local wallet row.
+3. Open dashboard → **Developer token** → **Issue**, or (when `HACKME_INTEGRATOR_SELF_REGISTER=1`):
 
 ```bash
-export HACKME_ADMIN_TOKEN=…
+hackme-fuzzing register --base http://127.0.0.1:8080 --save
+```
+
+4. **Recommended (B2B final):**
+
+```bash
+export HACKME_ADMIN_TOKEN=…   # or use saved developer token
 hackme-fuzzing wizard --pack secrets --package audit --title "Secrets scan"
 hackme-fuzzing wizard --pack filter_utf8 --package audit --title "FluxTap-class filter preflight"
 hackme-fuzzing wizard --wasm ./guard.wasm --package deep --public-proof
 ```
 
-4. Wizard prints `report_url`, `gate_url`, `pulse_url`, one-time `customer_report_token`.
-5. Pool miners pick up `pool_distributed` campaigns; hybrid rigs run fuzz in PoH backpressure windows.
+5. Wizard prints `report_url`, `gate_url`, `pulse_url` on **your node** (`http://127.0.0.1:8080/...`), plus one-time `customer_report_token`. Override host only with `HACKME_PUBLIC_REPORT_BASE` if you mirror reports.
+6. Pool miners pick up `pool_distributed` campaigns; hybrid rigs run fuzz in PoH backpressure windows.
 
 ### Hunt (separate from Dig wizard)
 

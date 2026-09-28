@@ -160,9 +160,11 @@ func doWizard(base string, args []string) error {
 		fmt.Println(string(prettyJSON(b)))
 		return fmt.Errorf("missing campaign_id or customer_report_token in response")
 	}
+	// Campaign data lives on --base (loopback). Default report/gate/pulse to that node.
+	// Override only via HACKME_PUBLIC_REPORT_BASE when reports are mirrored to a public host.
 	publicBase := strings.TrimSpace(os.Getenv("HACKME_PUBLIC_REPORT_BASE"))
 	if publicBase == "" {
-		publicBase = "https://hackme.tech"
+		publicBase = strings.TrimRight(base, "/")
 	}
 	publicBase = strings.TrimRight(publicBase, "/")
 	reportURL := publicBase + "/api/fuzz/campaigns/" + campaignID + "/report.html"
