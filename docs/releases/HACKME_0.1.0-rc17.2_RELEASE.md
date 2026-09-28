@@ -32,10 +32,10 @@ _From published `SHA256SUMS.txt` / `SHA256SUMS-iso.txt` on GitHub + `hackme.tech
 
 | File | Hash |
 |---|---|
-| `hackme_0.1.0-rc17.2_windows.zip` | `e2a3bae1f658d47233e7b1cd98da920c5983c89134a352b10ce101e1411d2811` |
-| `hackme_0.1.0-rc17.2_windows_setup.zip` | `e1a0a7ba21eaae46776c5db72b64c9e1e19cd3f6c3cab948d3a627ff5b484a0d` |
+| `hackme_0.1.0-rc17.2_windows.zip` | `c21bcfe19c6d5d6ecafc5ce6d50de07ffd2a9dc2d846ae2005707380e2ae1d8d` |
+| `hackme_0.1.0-rc17.2_windows_setup.zip` | `45656c130e02fd83a65880e80f33e80847729e4a1fcef4f77fdf4c536e69a80e` |
 | `hackme_0.1.0-rc17.2_linux.tar.gz` | `7aea1d7acd6831818a496277fcde477ae08b01c129880913c3d83172ecb8f6ac` |
-| `HackMe-Setup-0.1.0-rc17.2.exe` | `da2e31ecbc7ddbf17c7ad89fb63b40c61785b3d65edc14daf15315ec2b160c91` |
+| `HackMe-Setup-0.1.0-rc17.2.exe` | `413537a2862204e62be2ac9f6881e5b03a5c464c0f548582d670f2d605892966` |
 | `Install-HackMe.ps1` | `99cab528dbbc1ac8e30913f60893af5c55bc999f9ad1007fa611fd0e199498a7` |
 | `HackMe-Install.cmd` | `0ac66574d6c2eb2bc605f3d254d912f08bb7f46befb8b66db9edc61618c8d243` |
 | `hackme-fuzzing-0.1.0-rc17.2-linux-amd64` | `f7dc908ece2d3b5ff0518965c95074a78eb5e07965ad547a8cb3b26a944be4aa` |
