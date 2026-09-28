@@ -2906,9 +2906,12 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 						wc = v
 					}
 				case float64:
-					// JSON numbers decode as float64; only accept exact ints in [1, MaxInt].
-					if v >= 1 && v <= float64(math.MaxInt) && math.Trunc(v) == v {
-						wc = int(v)
+					// JSON numbers decode as float64. Avoid int(float64) (CodeQL
+					// go/incorrect-integer-conversion); round-trip via ParseInt bitSize 0 (= int).
+					if v >= 1 && v == math.Trunc(v) {
+						if n, err := strconv.ParseInt(strconv.FormatFloat(v, 'f', 0, 64), 10, 0); err == nil && n >= 1 {
+							wc = int(n)
+						}
 					}
 				}
 			}
