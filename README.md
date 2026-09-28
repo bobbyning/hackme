@@ -17,7 +17,7 @@ Hashrate settles on-chain. Security work is escrowed, distributed, and reported 
 
 <br/>
 
-[![Release](https://img.shields.io/badge/release-0.1.0--rc17_LIVE-00d1ff?style=for-the-badge)](https://hackme.tech/downloads.html)
+[![Release](https://img.shields.io/badge/release-0.1.0--rc17.2_LIVE-00d1ff?style=for-the-badge)](https://hackme.tech/downloads.html)
 [![Pool](https://img.shields.io/badge/pool-LIVE-39ff14?style=for-the-badge)](https://hackme.tech/pool/coordinator/api/pool/stats)
 [![CI](https://github.com/jokeez/hackme/actions/workflows/ci.yml/badge.svg)](https://github.com/jokeez/hackme/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-7fe7ff?style=for-the-badge)](LICENSE)

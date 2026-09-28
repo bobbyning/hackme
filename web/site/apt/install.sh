@@ -161,11 +161,11 @@ echo "[hackme-apt] OK — binaries in /opt/hackme"
 # Drop it into the installing user's config so desktop launch can mine on the public pool.
 install_pool_token_for_user() {
   local u home cfg url tok
+  # Prefer the human who invoked sudo; if already root (docker/CI), still drop token for root.
   u="${SUDO_USER:-}"
-  [[ -n "$u" && "$u" != "root" ]] || {
-    echo "[hackme-apt] pool token: skipped (no SUDO_USER) — see https://hackme.tech/downloads.html#pool-token"
-    return 0
-  }
+  if [[ -z "$u" || "$u" == "root" ]]; then
+    u="root"
+  fi
   home="$(getent passwd "$u" | cut -d: -f6)"
   [[ -n "$home" && -d "$home" ]] || return 0
   cfg="${home}/.config/hackme"
