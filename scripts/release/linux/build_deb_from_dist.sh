@@ -161,6 +161,10 @@ cat >"$POSTINST" <<'EOF'
 #!/bin/sh
 set -e
 mkdir -p /opt/hackme/data /opt/hackme/logs
+# Desktop users (apt) must be able to flock worker locks under /opt/hackme/logs
+# when an older worker_autostart ignores HACKME_WORKER_LOCK_DIR. Sticky + world-writable
+# is intentional for multi-user miners on one box; preferred path is ~/.local/share/hackme/logs.
+chmod 1777 /opt/hackme/logs 2>/dev/null || true
 chmod 0755 /opt/hackme/hackme \
   /opt/hackme/update_hackme_miner.sh \
   /opt/hackme/start_hackme_miner.sh \

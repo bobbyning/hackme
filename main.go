@@ -2730,6 +2730,9 @@ func (a *app) handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 				"COORD_TOKEN="+coordToken,
 				"HACKME_REPO_ROOT="+repoRoot,
 			)
+			if absLog, err := filepath.Abs(logDir); err == nil && absLog != "" {
+				workerEnv = append(workerEnv, "LOG_DIR="+absLog)
+			}
 			if seedHex, err := minerSubmitSeedHexForDataDir(strings.TrimSpace(a.dataDir)); err == nil && seedHex != "" {
 				workerEnv = append(workerEnv, "HACKME_MINER_ED25519_SEED_HEX="+seedHex)
 			}

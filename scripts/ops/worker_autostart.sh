@@ -42,8 +42,26 @@ elif [[ -x "${SCRIPT_DIR}/../hackme" || -x "${SCRIPT_DIR}/../bin/workerpoh" ]]; 
 else
   ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 fi
-LOG_DIR="${LOG_DIR:-${ROOT_DIR}/logs}"
-mkdir -p "$LOG_DIR"
+# Prefer node-provided writable dirs. Apt/desktop runs as a normal user with
+# HACKME_WORKER_LOCK_DIR=~/.local/share/hackme/logs — /opt/hackme/logs is root-owned.
+if [[ -z "${LOG_DIR:-}" ]]; then
+  if [[ -n "${HACKME_WORKER_LOCK_DIR:-}" ]]; then
+    LOG_DIR="${HACKME_WORKER_LOCK_DIR}"
+  else
+    LOG_DIR="${ROOT_DIR}/logs"
+  fi
+fi
+if ! mkdir -p "$LOG_DIR" 2>/dev/null || [[ ! -w "$LOG_DIR" ]]; then
+  fallback="${XDG_STATE_HOME:-$HOME/.local/share}/hackme/logs"
+  echo "[worker-autostart] WARN: LOG_DIR=$LOG_DIR not writable — fallback $fallback" >&2
+  LOG_DIR="$fallback"
+  mkdir -p "$LOG_DIR" || {
+    echo "[worker-autostart] cannot create LOG_DIR=$LOG_DIR" >&2
+    exit 1
+  }
+fi
+export LOG_DIR
+export HACKME_WORKER_LOCK_DIR="${HACKME_WORKER_LOCK_DIR:-$LOG_DIR}"
 
 LOCK_FILE="${LOG_DIR}/.worker_autostart.lock"
 exec 200>"$LOCK_FILE"
