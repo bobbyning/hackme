@@ -156,6 +156,47 @@ if ! dpkg -i "$DEB_PATH"; then
 fi
 dpkg -l hackme-node | tail -1
 echo "[hackme-apt] OK — binaries in /opt/hackme"
-echo "[hackme-apt] start:  bash /opt/hackme/start_hackme_miner.sh"
+
+# Pool worker token is intentionally NOT in the .deb (Debian packages must not ship secrets).
+# Drop it into the installing user's config so desktop launch can mine on the public pool.
+install_pool_token_for_user() {
+  local u home cfg url tok
+  u="${SUDO_USER:-}"
+  [[ -n "$u" && "$u" != "root" ]] || {
+    echo "[hackme-apt] pool token: skipped (no SUDO_USER) — see https://hackme.tech/downloads.html#pool-token"
+    return 0
+  }
+  home="$(getent passwd "$u" | cut -d: -f6)"
+  [[ -n "$home" && -d "$home" ]] || return 0
+  cfg="${home}/.config/hackme"
+  install -d -m 0700 -o "$u" -g "$u" "$cfg"
+  url=""
+  for url in \
+    "${SITE}/dist/pool.miner.token" \
+    "${SITE}/dist/release_${VER_TAG}/linux/pool.miner.token" \
+    "https://${ORIGIN_IP}/dist/release_${VER_TAG}/linux/pool.miner.token"; do
+    [[ -n "$url" ]] || continue
+    if [[ "$url" == https://${ORIGIN_IP}/* ]]; then
+      curl -fsSL --connect-timeout 10 --max-time 30 -k -H "Host: hackme.tech" "$url" -o "${cfg}/pool.miner.token.tmp" 2>/dev/null || continue
+    else
+      curl -fsSL --connect-timeout 10 --max-time 30 "$url" -o "${cfg}/pool.miner.token.tmp" 2>/dev/null || continue
+    fi
+    tok="$(tr -d '\r\n' <"${cfg}/pool.miner.token.tmp" 2>/dev/null || true)"
+    if [[ -n "$tok" && "$tok" != "REPLACE_WITH_POOL_TOKEN" && ${#tok} -ge 16 ]]; then
+      mv -f "${cfg}/pool.miner.token.tmp" "${cfg}/pool.miner.token"
+      chown "$u:$u" "${cfg}/pool.miner.token"
+      chmod 0600 "${cfg}/pool.miner.token"
+      echo "[hackme-apt] pool token → ${cfg}/pool.miner.token"
+      return 0
+    fi
+    rm -f "${cfg}/pool.miner.token.tmp"
+  done
+  echo "[hackme-apt] WARN: could not fetch pool token — https://hackme.tech/downloads.html#pool-token" >&2
+}
+
+install_pool_token_for_user
+
+echo "[hackme-apt] start:  Apps menu → HackMe   (or: bash /opt/hackme/hackme_desktop_launch.sh)"
+echo "[hackme-apt] dashboard: http://127.0.0.1:8080"
 echo "[hackme-apt] later:  curl -fsSL ${APT_BASE}/upgrade.sh | sudo bash"
 echo "[hackme-apt]    or:  sudo apt upgrade hackme-node  (may be slow via CDN)"

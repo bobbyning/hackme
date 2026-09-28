@@ -78,6 +78,49 @@
     .dl-section-tight .panel-head h2 { margin-bottom: 0.35rem; }
     .dl-muted-links { margin-top: 0.85rem; font-size: 0.88rem; }
     details.dev-details summary { cursor: pointer; color: var(--primary); }
+    .dl-steps {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    @media (max-width: 800px) {
+      .dl-steps { grid-template-columns: 1fr; }
+    }
+    .dl-step {
+      border: 1px solid rgba(77, 228, 255, 0.16);
+      border-radius: 0.85rem;
+      padding: 1rem 1.05rem;
+      background: rgba(8, 14, 27, 0.35);
+    }
+    .dl-step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.55rem;
+      height: 1.55rem;
+      border-radius: 999px;
+      margin-bottom: 0.55rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: #041018;
+      background: linear-gradient(135deg, #4de4ff, #6effad);
+    }
+    .dl-step h3 {
+      margin: 0 0 0.4rem;
+      font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+      font-size: 1.05rem;
+    }
+    .dl-step p { margin: 0; }
+    .dl-callout {
+      margin-top: 1rem;
+      padding: 0.9rem 1rem;
+      border-radius: 0.85rem;
+      border: 1px solid rgba(255, 196, 86, 0.28);
+      background: rgba(255, 196, 86, 0.06);
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
@@ -114,7 +157,7 @@
         </article>
         <article class="card glass">
           <h3>Linux</h3>
-          <p class="subtle">Tarball with miners, or <code>.deb</code> into <code>/opt/hackme</code>.</p>
+          <p class="subtle">Tarball includes pool token. Apt/.deb needs one extra step → <a href="#pool-token">#pool-token</a>.</p>
           <a id="download-linux" class="btn btn-primary btn-block" href="#">Download Linux Bundle</a>
           <a id="download-linux-deb" class="btn btn-secondary btn-block" href="#">Download .deb</a>
           <p class="subtle" style="font-size:0.82rem">Tar: <code>cd linux &amp;&amp; bash start_hackme_miner.sh</code><br>
@@ -132,8 +175,9 @@
       <div class="dl-strip">
         <strong style="color:#6effad;letter-spacing:0.06em;font-size:0.72rem;text-transform:uppercase">After install</strong>
         <span class="subtle">Windows: Start → <em>HackMe Miner</em></span>
-        <span class="subtle">Linux: <code>bash start_hackme_miner.sh</code></span>
-        <span class="subtle">Update later: <code>update_hackme_miner.bat</code> / <code>bash update_hackme_miner.sh</code></span>
+        <span class="subtle">Linux tar: <code>bash start_hackme_miner.sh</code></span>
+        <span class="subtle">Linux apt: Apps → <em>HackMe</em> · <a href="#pool-token">pool token</a></span>
+        <span class="subtle">Update: <code>update_hackme_miner.bat</code> / <code>bash update_hackme_miner.sh</code></span>
       </div>
     </section>
 
@@ -141,7 +185,7 @@
       <div class="panel-head">
         <p class="kicker" style="color:#00d1ff">Ubuntu / Debian</p>
         <h2>Signed apt · <code>hackme-node</code></h2>
-        <p class="subtle">Install under <code>/opt/hackme</code>. Keeps your <code>.env</code>. Branded app menu included.</p>
+        <p class="subtle">Install under <code>/opt/hackme</code>. Keeps your <code>.env</code>. Branded app menu included. <code>install.sh</code> also drops the public pool token for your user.</p>
       </div>
       <pre class="code-block" style="margin-top:0.85rem;font-size:0.84rem"><code>curl -fsSL https://hackme.tech/apt/install.sh | sudo bash
 # later (fast mirrors, not slow CDN apt fetch):
@@ -152,13 +196,59 @@ curl -fsSL https://hackme.tech/apt/upgrade.sh | sudo bash</code></pre>
   | sudo tee /usr/share/keyrings/hackme-archive-keyring.gpg >/dev/null
 echo 'deb [signed-by=/usr/share/keyrings/hackme-archive-keyring.gpg] https://hackme.tech/apt stable main' \
   | sudo tee /etc/apt/sources.list.d/hackme.list
-sudo apt update &amp;&amp; sudo apt install hackme-node</code></pre>
+sudo apt update &amp;&amp; sudo apt install hackme-node
+# then enable public pool mining → #pool-token</code></pre>
       </details>
       <p class="dl-muted-links subtle">
         <a href="/apt/install.sh">install.sh</a> ·
         <a href="/apt/hackme-archive-keyring.gpg">keyring</a> ·
         <a href="/apt/hackme.list">apt list</a> ·
-        <a id="download-latest-json" href="/dist/latest.json">latest.json</a>
+        <a id="download-latest-json" href="/dist/latest.json">latest.json</a> ·
+        <a href="#pool-token">pool token</a>
+      </p>
+    </section>
+
+    <section class="panel glass dl-section-tight" id="pool-token">
+      <div class="panel-head">
+        <p class="kicker" style="color:#6effad">Public pool</p>
+        <h2>One-time pool token (Linux apt / .deb)</h2>
+        <p class="subtle">
+          Windows Setup and the Linux <strong>tarball</strong> already include <code>pool.miner.token</code>.
+          The apt <code>.deb</code> does <strong>not</strong> — Debian packages must not ship credentials.
+          Without this file the node starts, but mining shows <code>coordinator_token_required</code>.
+        </p>
+      </div>
+
+      <div class="dl-steps">
+        <article class="dl-step">
+          <span class="dl-step-num">1</span>
+          <h3>Install the node</h3>
+          <p class="subtle">Use <a href="#apt">signed apt</a> or the <code>.deb</code> download. Binaries land in <code>/opt/hackme</code>.</p>
+        </article>
+        <article class="dl-step">
+          <span class="dl-step-num">2</span>
+          <h3>Drop the pool token</h3>
+          <p class="subtle"><code>install.sh</code> does this automatically. If you used manual apt, run the block below once.</p>
+        </article>
+      </div>
+
+      <pre class="code-block" style="margin-top:1rem;font-size:0.84rem"><code>mkdir -p ~/.config/hackme
+curl -fsSL -o ~/.config/hackme/pool.miner.token \
+  https://hackme.tech/dist/pool.miner.token
+chmod 600 ~/.config/hackme/pool.miner.token
+
+# restart
+pkill -f '/opt/hackme/hackme' 2>/dev/null || true
+bash /opt/hackme/hackme_desktop_launch.sh
+# → dashboard http://127.0.0.1:8080</code></pre>
+
+      <div class="dl-callout">
+        <strong style="color:#ffc456">Not the admin token.</strong>
+        <span class="subtle"> Use the public pool worker token above — not <code>HACKME_ADMIN_TOKEN</code> from your local <code>.env</code>.</span>
+      </div>
+      <p class="dl-muted-links subtle">
+        Also accepted: <code>~/Downloads/pool.miner.token</code> · paste in dashboard worker start ·
+        release path <code>/dist/release_&lt;ver&gt;/linux/pool.miner.token</code>
       </p>
     </section>
 

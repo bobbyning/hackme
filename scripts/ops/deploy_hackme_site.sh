@@ -115,14 +115,38 @@ echo "[deploy-hackme-site] rsync web/site -> ${NODE_SSH}:${NODE_DEPLOY_DIR}/web/
 deploy_ssh_retry_run _deploy_rsync -az --delete --mkpath \
   "${ROOT_DIR}/web/site/" "${NODE_SSH}:${NODE_DEPLOY_DIR}/web/site/"
 
+# Stable pool-token pointer for apt onboarding docs (tiny; publish even when SKIP_DIST=1).
+publish_stable_pool_token() {
+  local ver="" src=""
+  if [[ -f "${ROOT_DIR}/dist/latest.json" ]] && command -v jq >/dev/null 2>&1; then
+    ver="$(jq -r '.version // empty' "${ROOT_DIR}/dist/latest.json" 2>/dev/null || true)"
+  fi
+  if [[ -n "$ver" && -f "${ROOT_DIR}/dist/release_${ver}/linux/pool.miner.token" ]]; then
+    src="${ROOT_DIR}/dist/release_${ver}/linux/pool.miner.token"
+  else
+    src="$(ls -1 "${ROOT_DIR}"/dist/release_*/linux/pool.miner.token 2>/dev/null | sort -V | tail -n1 || true)"
+  fi
+  if [[ -z "$src" || ! -f "$src" ]]; then
+    echo "[deploy-hackme-site] WARN: no pool.miner.token to publish at /dist/pool.miner.token" >&2
+    return 0
+  fi
+  install -m 0644 "$src" "${ROOT_DIR}/dist/pool.miner.token"
+  echo "[deploy-hackme-site] rsync dist/pool.miner.token ← ${src#"$ROOT_DIR"/}"
+  deploy_ssh_retry_run _deploy_rsync -az --mkpath \
+    "${ROOT_DIR}/dist/pool.miner.token" "${NODE_SSH}:${NODE_DEPLOY_DIR}/dist/pool.miner.token"
+}
+
 if [[ "$SKIP_DIST" != "1" && -d "${ROOT_DIR}/dist" ]]; then
   if [[ ! -f "${ROOT_DIR}/dist/latest.json" ]]; then
     echo "[deploy-hackme-site] generating missing dist/latest.json"
     bash "${ROOT_DIR}/scripts/ops/publish_latest_json.sh" || \
       echo "[deploy-hackme-site] WARN: could not generate latest.json" >&2
   fi
+  publish_stable_pool_token
   echo "[deploy-hackme-site] rsync dist/ -> ${NODE_SSH}:${NODE_DEPLOY_DIR}/dist/"
   deploy_ssh_retry_run _deploy_rsync -az --mkpath "${ROOT_DIR}/dist/" "${NODE_SSH}:${NODE_DEPLOY_DIR}/dist/"
+elif [[ -d "${ROOT_DIR}/dist" ]]; then
+  publish_stable_pool_token
 fi
 
 # Signed apt repo (pool + dists) — separate from dist/ release blobs
@@ -186,5 +210,13 @@ if command -v jq >/dev/null 2>&1; then
     echo "[deploy-hackme-site] GET /apt/dists/stable/InRelease HTTP 200"
   else
     echo "[deploy-hackme-site] WARN: /apt InRelease HTTP ${acode:-error} (rsync dist/apt/repo + nginx /apt/)" >&2
+  fi
+  tcode="$(curl -fsS --max-time 15 -o /tmp/hackme-pool-token-smoke -w "%{http_code}" "https://hackme.tech/dist/pool.miner.token" || true)"
+  tlen="$(wc -c </tmp/hackme-pool-token-smoke 2>/dev/null | tr -d ' ' || echo 0)"
+  rm -f /tmp/hackme-pool-token-smoke
+  if [[ "$tcode" == "200" && "${tlen:-0}" -ge 16 ]]; then
+    echo "[deploy-hackme-site] GET /dist/pool.miner.token OK (${tlen} bytes)"
+  else
+    echo "[deploy-hackme-site] WARN: /dist/pool.miner.token HTTP ${tcode:-error} len=${tlen:-0}" >&2
   fi
 fi
