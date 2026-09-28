@@ -32,10 +32,10 @@ _From published `SHA256SUMS.txt` / `SHA256SUMS-iso.txt` on GitHub + `hackme.tech
 
 | File | Hash |
 |---|---|
-| `hackme_0.1.0-rc17.2_windows.zip` | `ccb961f7ca4baa8e8efbf2bb1db9a3972fe09232985c3236729fffa88434436e` |
-| `hackme_0.1.0-rc17.2_windows_setup.zip` | `9efe27cb3abf1683ef15b98c169916d08c7ce4a9e530d09c6ddf7516a320e2eb` |
+| `hackme_0.1.0-rc17.2_windows.zip` | `e2a3bae1f658d47233e7b1cd98da920c5983c89134a352b10ce101e1411d2811` |
+| `hackme_0.1.0-rc17.2_windows_setup.zip` | `e1a0a7ba21eaae46776c5db72b64c9e1e19cd3f6c3cab948d3a627ff5b484a0d` |
 | `hackme_0.1.0-rc17.2_linux.tar.gz` | `7aea1d7acd6831818a496277fcde477ae08b01c129880913c3d83172ecb8f6ac` |
-| `HackMe-Setup-0.1.0-rc17.2.exe` | `71164a1881361834a89c7d2a3ceb2a6be8146d80bb78c49ae34962f74ce77452` |
+| `HackMe-Setup-0.1.0-rc17.2.exe` | `da2e31ecbc7ddbf17c7ad89fb63b40c61785b3d65edc14daf15315ec2b160c91` |
 | `Install-HackMe.ps1` | `99cab528dbbc1ac8e30913f60893af5c55bc999f9ad1007fa611fd0e199498a7` |
 | `HackMe-Install.cmd` | `0ac66574d6c2eb2bc605f3d254d912f08bb7f46befb8b66db9edc61618c8d243` |
 | `hackme-fuzzing-0.1.0-rc17.2-linux-amd64` | `f7dc908ece2d3b5ff0518965c95074a78eb5e07965ad547a8cb3b26a944be4aa` |
@@ -60,6 +60,9 @@ Official mirrors:
 - `https://hackme.tech/dist/latest.json`
 
 ## Notes
+
+- Windows installer license page is **AGPL-3.0** (not Apache-2.0).
+- Windows auto GPU: VirtualBox/Hyper-V displays no longer force OpenCL when OpenCL.dll is missing.
 
 - Supersedes published installers from **0.1.0-rc17** / runtime hotpatch **0.1.0-rc17.1**.
 - Apt `.deb` does **not** ship `pool.miner.token` — use `curl -fsSL https://hackme.tech/apt/install.sh | sudo bash` or [downloads `#pool-token`](https://hackme.tech/downloads.html#pool-token).

@@ -1,8 +1,17 @@
 HackMe Network — Windows miner installer
 
-Copyright HackMe contributors. Licensed under Apache-2.0.
-See https://github.com/jokeez/hackme and https://hackme.tech
+Copyright (C) 2026 HackMe contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
 
 This installer places HackMe node binaries on your PC for participation in the
-public Useful PoW pool at hackme.tech. GPU overclocking is your responsibility;
-use vendor tools (AMD Adrenalin, NVIDIA App) at your own risk.
+public Useful PoW pool at hackme.tech.
+
+Full license text: https://github.com/jokeez/hackme/blob/main/LICENSE
+(AGPL-3.0). Trademark and brand terms: docs/TRADEMARK.md
+
+GPU overclocking is your responsibility; use vendor tools (AMD Adrenalin,
+NVIDIA App) at your own risk.

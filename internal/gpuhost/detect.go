@@ -49,6 +49,26 @@ func classifyName(name string) (nvidia, amd, intel bool) {
 	return nvidia, amd, intel
 }
 
+// isVirtualDisplayAdapter filters VM/hypervisor display adapters that are not
+// real CUDA/OpenCL mining GPUs (VirtualBox/VMware/Hyper-V/QEMU basic displays).
+func isVirtualDisplayAdapter(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return false
+	}
+	needles := []string{
+		"virtualbox", "vmware", "hyper-v", "hyperv", "qemu", "virtio",
+		"microsoft basic display", "basic render", "remote desktop adapter",
+		"citrix", "parallels display",
+	}
+	for _, s := range needles {
+		if strings.Contains(n, s) {
+			return true
+		}
+	}
+	return false
+}
+
 func mergeReportNames(rep *HostGPUReport, names ...string) {
 	seen := make(map[string]bool, len(rep.Names))
 	for _, x := range rep.Names {
@@ -56,7 +76,7 @@ func mergeReportNames(rep *HostGPUReport, names ...string) {
 	}
 	for _, raw := range names {
 		n := strings.TrimSpace(raw)
-		if n == "" {
+		if n == "" || isVirtualDisplayAdapter(n) {
 			continue
 		}
 		key := strings.ToLower(n)

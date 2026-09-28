@@ -51,3 +51,33 @@ func TestResolveBackendNoGPU(t *testing.T) {
 		t.Fatalf("got %q want cpu", b)
 	}
 }
+
+func TestResolveBackendVirtualOnlyDisplayIsCPU(t *testing.T) {
+	// VirtualBox / Hyper-V names must not force OpenCL when no real vendor GPU.
+	b := ResolveBackend(BackendChoiceInput{
+		Report:          HostGPUReport{Names: []string{"VirtualBox Graphics Adapter (WDDM)"}},
+		HasOCLWorkerBin: true,
+	})
+	if b != "cpu" {
+		t.Fatalf("got %q want cpu for virtual adapter", b)
+	}
+}
+
+func TestIsVirtualDisplayAdapter(t *testing.T) {
+	if !isVirtualDisplayAdapter("VirtualBox Graphics Adapter (WDDM)") {
+		t.Fatal("expected VirtualBox adapter to be virtual")
+	}
+	if isVirtualDisplayAdapter("AMD Radeon RX 580") {
+		t.Fatal("RX 580 must not be virtual")
+	}
+}
+
+func TestResolveBackendAMDWithoutOCLBinIsCPU(t *testing.T) {
+	b := ResolveBackend(BackendChoiceInput{
+		Report:          HostGPUReport{HasAMD: true, Names: []string{"Radeon RX 580"}},
+		HasOCLWorkerBin: false,
+	})
+	if b != "cpu" {
+		t.Fatalf("got %q want cpu when opencl worker binary missing", b)
+	}
+}

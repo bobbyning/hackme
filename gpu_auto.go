@@ -38,12 +38,11 @@ func resolveAutoGPUBackend(repoRoot string) string {
 	rep := hostGPUInventory()
 	cudaBin, oclBin := gpuhost.ProbeWorkerBins(repoRoot)
 	if runtime.GOOS == "windows" {
-		if !cudaBin && !oclBin {
-			if wp, err := resolveWorkerpohExePathForBackend(""); err == nil {
-				base := strings.ToLower(filepath.Base(wp))
-				oclBin = strings.Contains(base, "opencl")
-				cudaBin = strings.Contains(base, "cuda")
-			}
+		// Only treat OpenCL as available when the ICD/runtime DLL exists. Shipping
+		// workerpoh-opencl.exe in the installer is not enough (VBox/VMs often have
+		// a virtual display adapter but no OpenCL.dll → instant worker crash).
+		if oclBin && !windowsOpenCLRuntimePresent() {
+			oclBin = false
 		}
 	}
 	backend := gpuhost.ResolveBackend(gpuhost.BackendChoiceInput{
@@ -55,10 +54,25 @@ func resolveAutoGPUBackend(repoRoot string) string {
 		HasOCLWorkerBin:  oclBin,
 		NVIDIASMIOK:      nvidiaSMILinesOK() || len(queryNVIDIAMulti()) > 0 || len(gpuhost.ListNVIDIAProcCards()) > 0,
 	})
-	if backend == "cpu" && len(rep.Names) > 0 && oclBin {
-		return "opencl"
-	}
 	return backend
+}
+
+func windowsOpenCLRuntimePresent() bool {
+	if runtime.GOOS != "windows" {
+		return true
+	}
+	for _, p := range []string{
+		filepath.Join(os.Getenv("SystemRoot"), "System32", "OpenCL.dll"),
+		filepath.Join(os.Getenv("SystemRoot"), "SysWOW64", "OpenCL.dll"),
+	} {
+		if p == "" {
+			continue
+		}
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func envTruthyGPU(key string) bool {

@@ -23,9 +23,20 @@ func ResolveBackend(in BackendChoiceInput) string {
 		return "cpu"
 	}
 	if in.ForceOpenCL {
-		return "opencl"
+		if in.HasOCLWorkerBin {
+			return "opencl"
+		}
+		return "cpu"
 	}
 	rep := in.Report
+	// Drop VM display adapters so VirtualBox/Hyper-V do not look like "a GPU".
+	filtered := make([]string, 0, len(rep.Names))
+	for _, n := range rep.Names {
+		if !isVirtualDisplayAdapter(n) {
+			filtered = append(filtered, n)
+		}
+	}
+	rep.Names = filtered
 	if !rep.HasNVIDIA && !rep.HasAMD && !rep.HasIntel && len(rep.Names) == 0 {
 		return "cpu"
 	}
@@ -33,26 +44,23 @@ func ResolveBackend(in BackendChoiceInput) string {
 		if in.HasCUDAWorkerBin && in.NVIDIASMIOK {
 			return "cuda"
 		}
+		// NVIDIA without working CUDA: OpenCL only when the OpenCL worker binary exists.
 		if in.HasOCLWorkerBin {
 			return "opencl"
 		}
-		if in.NVIDIASMIOK && in.HasCUDAWorkerBin {
-			return "cuda"
-		}
+		return "cpu"
 	}
 	if rep.HasAMD || rep.HasIntel {
 		if in.HasOCLWorkerBin {
 			return "opencl"
 		}
-		return "opencl"
+		return "cpu"
 	}
 	if in.NVIDIASMIOK && in.HasCUDAWorkerBin {
 		return "cuda"
 	}
+	// Unknown named adapters — never force OpenCL just because a display name exists.
 	if len(rep.Names) > 0 && in.HasOCLWorkerBin {
-		return "opencl"
-	}
-	if len(rep.Names) > 0 {
 		return "opencl"
 	}
 	return "cpu"

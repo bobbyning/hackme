@@ -2349,9 +2349,17 @@ func resolveWorkerpohExePath() (string, error) {
 
 func resolveWorkerpohExePathForBackend(backend string) (string, error) {
 	tryDir := func(dir string) (string, bool) {
-		names := []string{"workerpoh-opencl.exe", "workerpoh.exe"}
-		if strings.EqualFold(backend, "cuda") {
-			names = []string{"workerpoh-cuda.exe", "workerpoh-opencl.exe", "workerpoh.exe"}
+		// Prefer the generic workerpoh.exe unless the caller explicitly asked for
+		// OpenCL/CUDA. Preferring *-opencl.exe on "auto" breaks VMs / PCs without
+		// OpenCL.dll (process exits immediately with STATUS_DLL_NOT_FOUND).
+		names := []string{"workerpoh.exe", "workerpoh-opencl.exe"}
+		switch {
+		case strings.EqualFold(backend, "cuda"):
+			names = []string{"workerpoh-cuda.exe", "workerpoh.exe", "workerpoh-opencl.exe"}
+		case strings.EqualFold(backend, "opencl"):
+			names = []string{"workerpoh-opencl.exe", "workerpoh.exe"}
+		case strings.EqualFold(backend, "cpu"):
+			names = []string{"workerpoh.exe", "workerpoh-cpu.exe"}
 		}
 		for _, name := range names {
 			wp := filepath.Join(dir, name)
