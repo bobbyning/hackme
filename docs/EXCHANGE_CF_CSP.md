@@ -1,27 +1,35 @@
-# Cloudflare vs origin CSP for exchange.hackme.tech
+# exchange.hackme.tech — framing CSP (hub iframe)
 
-**Origin (VPS nginx):** sets `Content-Security-Policy` with `frame-ancestors 'self' https://hackme.tech …`
-and `Cross-Origin-Resource-Policy: cross-origin` (`scripts/ops/nginx/hackme-exchange-domain.tls.conf`).
+**Origin** is Caddy on `89.150.41.40` (`scripts/ops/caddy/exchange.Caddyfile`), not the
+legacy nginx sketch in `scripts/ops/nginx/hackme-exchange-domain.tls.conf`.
 
-**Cloudflare (as of 2026-09-23):** public responses show `X-Frame-Options: SAMEORIGIN` and
-`Cross-Origin-Resource-Policy: same-origin`, and **omit** origin CSP. That **blocks hub iframe**
-from `https://hackme.tech` and undoes the frame-ancestors gate.
+Required HTTP response headers (browsers ignore `frame-ancestors` in `<meta>`):
 
-## Operator fix (Cloudflare dashboard)
+- `Content-Security-Policy` with
+  `frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080`
+  (full paper policy: fonts / Binance / CF insights — see Caddyfile)
+- `Cross-Origin-Resource-Policy: cross-origin`
+- **No** `X-Frame-Options: SAMEORIGIN` (use `-X-Frame-Options` in Caddy)
 
-For zone `hackme.tech` → hostname `exchange.hackme.tech`:
+## Status (2026-09-30)
 
-1. **Rules → Transform Rules → Modify Response Header** (or Configuration Rules):
-   - Remove header: `X-Frame-Options`
-   - Set header: `Content-Security-Policy` =
-     `default-src 'self'; base-uri 'self'; frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080; object-src 'none'`
-   - Set/override: `Cross-Origin-Resource-Policy` = `cross-origin`
-2. Purge cache for `https://exchange.hackme.tech/`
-3. Verify:
+Origin Caddy fixed + paper SPA redeployed. Public edge
+(`curl -sI https://exchange.hackme.tech/`) now passes CSP + CORP and does **not**
+send `X-Frame-Options`. Hub `#exchange` iframe framing is **GO**.
+
+`npm run smoke:live` (paper SPA) asserts HTTP CSP + no `XFO: SAMEORIGIN`.
+
+## If edge regresses
+
+1. On origin: `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`
+2. Confirm origin-direct:
    ```bash
-   curl -sI https://exchange.hackme.tech/ | grep -iE 'content-security|x-frame|cross-origin-resource'
-   # expect: CSP with frame-ancestors hackme.tech; no X-Frame-Options SAMEORIGIN
-   ssh hackme-vps 'curl -skI https://127.0.0.1/ -H "Host: exchange.hackme.tech" | grep -i content-security'
+   curl -skI --resolve exchange.hackme.tech:443:89.150.41.40 https://exchange.hackme.tech/ \
+     | grep -iE 'content-security|x-frame|cross-origin-resource'
    ```
+3. If origin is good but CF edge still injects `X-Frame-Options: SAMEORIGIN`, use
+   Cloudflare → Rules → Transform Rules → Modify Response Header for
+   `exchange.hackme.tech`: remove `X-Frame-Options`, set CSP / CORP as above, purge cache.
 
-Until CF is fixed, **origin is correct**; public edge framing claims remain conditional.
+Do **not** assume CF is the only source of XFO — the regression that blocked hub
+embed was origin Caddy shipping `X-Frame-Options: SAMEORIGIN` without CSP.
