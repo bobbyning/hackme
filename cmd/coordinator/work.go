@@ -1306,15 +1306,17 @@ func (m *workManager) checkClaimMinerIdentity(workerID, pubHex, addrHint string)
 
 	locked := m.lockedPayoutAddress(workerID)
 
+	// Hybrid/public pool: pubkey is mandatory. Address-only must NOT set the
+	// sticky payout lock — that lets a shared-token worker steal an unlocked
+	// worker_id's unpaid accrual without proving key possession.
+	if require && pubHex == "" {
+		return false, "claim_pubkey_required"
+	}
+
 	if pubHex == "" && addrHint == "" {
-		// Require-on: identity is mandatory.
 		// Require-off (HACKME_POOL_CLAIM_REQUIRE_PUBKEY=0): legacy workers omit
 		// pubkey. A stored lock must not turn that omission into a 403 — the
-		// fleet would stop renewing leases after the first keyed claim. A
-		// presented key that does not match the lock is still rejected below.
-		if require {
-			return false, "claim_pubkey_required"
-		}
+		// fleet would stop renewing leases after the first keyed claim.
 		return true, ""
 	}
 	derived := ""

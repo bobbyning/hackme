@@ -3,6 +3,10 @@
 #   - campaign status cancelled/completed on coordinator
 #   - optional: campaign_id prefix filter
 #
+# IMPORTANT: only ACK finalize/close kinds. Never mark run/finding/crash_bonus
+# as applied without an origin-node credit — that burns miner pays while
+# Cancel/Finalize refunds the payer (report #23 family).
+#
 # Hub (via ssh):
 #   NODE_SSH=hackme-vps bash scripts/ops/drain_stale_fuzz_settle_outbox.sh
 # Dry run:
@@ -63,10 +67,21 @@ SET status='applied', applied_at=strftime('%s','now')
 WHERE id IN (
   SELECT o.id FROM fuzz_settle_outbox o
   JOIN fuzz_campaigns c ON c.id = o.campaign_id
-  WHERE o.status='pending' AND c.status IN ('cancelled','completed')${where_extra}
+  WHERE o.status='pending'
+    AND lower(o.kind) IN ('finalize','close')
+    AND c.status IN ('cancelled','completed')${where_extra}
 );
 SELECT changes();" 2>/dev/null || echo 0)"
-log "marked applied: ${n}"
+log "marked applied (finalize/close only): ${n}"
+pay_left="$(run_sql "
+SELECT COUNT(*) FROM fuzz_settle_outbox o
+JOIN fuzz_campaigns c ON c.id = o.campaign_id
+WHERE o.status='pending'
+  AND lower(o.kind) IN ('run','finding','crash_bonus','bounty','unique_crash')
+  AND c.status IN ('cancelled','completed')${where_extra};" 2>/dev/null || echo 0)"
+if [[ "${pay_left}" != "0" ]]; then
+  log "WARN left ${pay_left} unpaid pay-row(s) pending on terminal campaigns — origin must drain or ops replay; not auto-ACKed"
+fi
 
 pending_after="$(run_sql "SELECT COUNT(*) FROM fuzz_settle_outbox o WHERE o.status='pending'${where_extra};" 2>/dev/null || echo 0)"
 log "pending after: ${pending_after}"

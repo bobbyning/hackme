@@ -1356,6 +1356,10 @@ func TestClaimMinerIdentityLocked(t *testing.T) {
 	if ok, reason := wm.checkClaimMinerIdentity("w1", "", ""); ok || reason != "claim_pubkey_required" {
 		t.Fatalf("require pubkey: ok=%v reason=%q", ok, reason)
 	}
+	// Address-only must not establish (or satisfy) a lock without proving the key.
+	if ok, reason := wm.checkClaimMinerIdentity("unlocked-rig", "", "HMC-aaaaaaaaaaaaaaaa"); ok || reason != "claim_pubkey_required" {
+		t.Fatalf("address-only under require must fail: ok=%v reason=%q", ok, reason)
+	}
 	pub2, _, _ := ed25519.GenerateKey(nil)
 	if ok, reason := wm.checkClaimMinerIdentity("w1", hex.EncodeToString(pub2), ""); ok || !strings.HasPrefix(reason, "payout_address_locked") {
 		t.Fatalf("locked mismatch: ok=%v reason=%q", ok, reason)

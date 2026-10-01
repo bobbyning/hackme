@@ -1370,7 +1370,8 @@ func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func metricsPrivileged(r *http.Request) bool {
-	if requestFromLoopback(r) {
+	// Loopback alone is not enough: require literal Host to block DNS-rebinding browsers.
+	if requestFromLoopback(r) && requestHostIsLoopbackLiteral(r) {
 		return true
 	}
 	return adminAuthEnabled() && adminRequestAuthed(r)
@@ -3602,7 +3603,7 @@ func (a *app) handleMiningLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	includeWorker := strings.TrimSpace(r.URL.Query().Get("include_worker")) == "1"
 	// Desktop loopback: read-only worker log tail is safe without pasting admin token in the browser.
-	allowWorkerTail := includeWorker && envBool("HACKME_DESKTOP_MODE", false) && requestFromLoopback(r)
+	allowWorkerTail := includeWorker && envBool("HACKME_DESKTOP_MODE", false) && requestFromLoopback(r) && requestHostIsLoopbackLiteral(r)
 	if includeWorker && !allowWorkerTail && !requireAdminAuthStrict(w, r) {
 		return
 	}
@@ -3662,7 +3663,7 @@ func (a *app) handleMiningLogsStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	allowStream := envBool("HACKME_DESKTOP_MODE", false) && requestFromLoopback(r)
+	allowStream := envBool("HACKME_DESKTOP_MODE", false) && requestFromLoopback(r) && requestHostIsLoopbackLiteral(r)
 	if !allowStream && !requireAdminAuthStrict(w, r) {
 		return
 	}

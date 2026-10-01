@@ -16,17 +16,22 @@ func (a *app) pullFuzzSettleOutbox(ctx context.Context) error {
 	if a.chain == nil || !poolSyncCoordinatorConfigured() {
 		return nil
 	}
-	// Multi-pass catch-up: a few foreign/stale head rows used to pin the oldest-first
-	// outbox window so local campaigns never drained (seen with leftover b2b-* rows).
+	// Multi-pass catch-up until the outbox window is empty (or hard-stuck).
+	// Early "acked < 64 → break" used to return nil while unpaid rows remained,
+	// then cancel/finalize refunded the payer (report #23 residual).
+	const maxPasses = 32
 	totalAcked := 0
-	for pass := 0; pass < 6; pass++ {
+	for pass := 0; pass < maxPasses; pass++ {
 		items, err := poolsync.FetchSettleOutbox(ctx, 256)
 		if err != nil {
 			log.Printf("fuzz settle pull: fetch outbox: %v", err)
 			return err
 		}
 		if len(items) == 0 {
-			break
+			if totalAcked > 0 {
+				log.Printf("fuzz settle pull: applied %d outbox row(s)", totalAcked)
+			}
+			return nil
 		}
 		acked := make([]int64, 0, len(items))
 		localHits := 0
@@ -68,7 +73,6 @@ func (a *app) pullFuzzSettleOutbox(ctx context.Context) error {
 		}
 		if len(acked) == 0 {
 			// Head of queue is all foreign / stuck — do not pretend the outbox is drained.
-			// Returning an error blocks escrow finalize/cancel (report #23 V2b).
 			if localHits == 0 {
 				log.Printf("fuzz settle pull: %d outbox row(s) not local to this node (head blocked)", len(items))
 			}
@@ -79,14 +83,8 @@ func (a *app) pullFuzzSettleOutbox(ctx context.Context) error {
 			return err
 		}
 		totalAcked += len(acked)
-		if len(acked) < 64 {
-			break
-		}
 	}
-	if totalAcked > 0 {
-		log.Printf("fuzz settle pull: applied %d outbox row(s)", totalAcked)
-	}
-	return nil
+	return fmt.Errorf("fuzz settle pull: outbox still pending after %d passes (acked=%d)", maxPasses, totalAcked)
 }
 
 func (a *app) localFuzzEscrowStatus(ctx context.Context, campaignID string) (status string, ok bool) {

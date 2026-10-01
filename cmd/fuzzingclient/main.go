@@ -275,6 +275,9 @@ func apiDo(base, token, method, path string, body []byte) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	if req.URL.User != nil && req.URL.User.String() != "" {
+		return nil, 0, fmt.Errorf("refusing request: URL userinfo not allowed on API base")
+	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}

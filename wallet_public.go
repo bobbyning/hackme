@@ -13,7 +13,8 @@ func (a *app) writeWalletResponse(w http.ResponseWriter, r *http.Request, full m
 		return
 	}
 	// Same-origin desktop UI on 127.0.0.1 needs spendable balance; remote clients stay redacted.
-	if envBool("HACKME_DESKTOP_MODE", false) && requestFromLoopback(r) {
+	// Require literal loopback Host so DNS-rebinding (Host: evil, TCP→127.0.0.1) cannot read balances.
+	if envBool("HACKME_DESKTOP_MODE", false) && requestFromLoopback(r) && requestHostIsLoopbackLiteral(r) {
 		writeJSON(w, full)
 		return
 	}
