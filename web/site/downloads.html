@@ -216,6 +216,9 @@ sudo apt update &amp;&amp; sudo apt install hackme-node
           Windows Setup and the Linux <strong>tarball</strong> already include <code>pool.miner.token</code>.
           The apt <code>.deb</code> does <strong>not</strong> — Debian packages must not ship credentials.
           Without this file the node starts, but mining shows <code>coordinator_token_required</code>.
+          This file is the <strong>public shared join token</strong> for the open pool (anyone may mine with it).
+          It is <strong>not</strong> an admin/operator secret — admin APIs reject it. Same value:
+          <a href="https://hackme.tech/dist/pool.miner.token"><code>/dist/pool.miner.token</code></a>.
         </p>
       </div>
 

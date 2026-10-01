@@ -38,6 +38,9 @@ Out of scope (unless chained with the above):
 - Social engineering, phishing sites that copy our UI (report to us + hosting provider)
 - Miners running outdated forks without checksum verification
 - Issues in third-party GPU drivers
+- Finding the published **public pool worker token** (`pool.miner.token`) or using it to join the open pool (by design; not an admin token)
+- Noticing that pool-direct coordinator HTTP is reachable without TLS (documented low-latency miner path)
+- Calling documented public `GET /api/wallet/earnings` / `activity` for arbitrary `HMC-…` addresses (on-chain aggregates)
 
 ## Hardening references
 

@@ -53,6 +53,9 @@ Amounts below are **maximum guidelines** for a _single_ accepted report — the 
 - Low hashrate / “I earned too little” economics disputes
 - Third-party GPU drivers, OS malware on miner PC
 - Testnet/local-only misconfiguration unless it affects production defaults
+- **Public pool join token** (`pool.miner.token` in Windows/Linux release bundles, or `https://hackme.tech/dist/pool.miner.token`) — this is the **shared worker credential for the open pool**, not an operator/admin secret. It intentionally authenticates claim/submit only; admin routes reject it.
+- **Pool-direct cleartext HTTP** on the published coordinator direct URL (e.g. `:18083`) — intentional low-latency path for miners; TLS termination for browsers is on `https://hackme.tech/pool/…`. Hardening suggestions welcome as Informational, not High.
+- **Public wallet ledger metrics** (`GET /api/wallet/earnings`, `GET /api/wallet/activity` with optional `address=`) — documented integrator/explorer aggregates from the on-chain transfer ledger. Separate from `/api/wallet` redaction (which hides operator billing balance, not public flow totals).
 
 ---
 

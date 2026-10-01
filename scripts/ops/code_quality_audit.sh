@@ -71,6 +71,21 @@ for p, rel in files:
         continue
     by_hash[hashlib.sha256(b).hexdigest()].append(rel)
 
+def is_intentional_mirror(group):
+    """Allow exact copies that are published mirrors (apt host of ops scripts)."""
+    if len(group) != 2:
+        return False
+    a, b = sorted(group)
+    # scripts/ops/foo.sh ↔ web/site/apt/foo.sh (same basename)
+    prefixes = (
+        ("scripts/ops/", "web/site/apt/"),
+        ("web/site/apt/", "scripts/ops/"),
+    )
+    for left, right in prefixes:
+        if a.startswith(left) and b.startswith(right):
+            return Path(a).name == Path(b).name
+    return False
+
 dup_groups = []
 unexpected_dups = []
 for group in by_hash.values():
@@ -78,6 +93,8 @@ for group in by_hash.values():
         continue
     group_sorted = sorted(group)
     dup_groups.append(group_sorted)
+    if is_intentional_mirror(group_sorted):
+        continue
     unexpected_dups.append(group_sorted)
 
 # 2) Embedded dashboard present
