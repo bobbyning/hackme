@@ -1360,6 +1360,14 @@ func TestClaimMinerIdentityLocked(t *testing.T) {
 	if ok, reason := wm.checkClaimMinerIdentity("unlocked-rig", "", "HMC-aaaaaaaaaaaaaaaa"); ok || reason != "claim_pubkey_required" {
 		t.Fatalf("address-only under require must fail: ok=%v reason=%q", ok, reason)
 	}
+	// Even with require off, address-only must not write a sticky lock.
+	wmOff := &workManager{hybridSignerEnabled: true, claimRequirePubKey: false, worker: map[string]workerPayoutStat{}}
+	if ok, reason := wmOff.checkClaimMinerIdentity("legacy-rig", "", "HMC-bbbbbbbbbbbbbbbb"); !ok {
+		t.Fatalf("legacy address-only claim should pass without locking: %s", reason)
+	}
+	if got := wmOff.lockedPayoutAddress("legacy-rig"); got != "" {
+		t.Fatalf("address-only must not set payout lock, got %q", got)
+	}
 	pub2, _, _ := ed25519.GenerateKey(nil)
 	if ok, reason := wm.checkClaimMinerIdentity("w1", hex.EncodeToString(pub2), ""); ok || !strings.HasPrefix(reason, "payout_address_locked") {
 		t.Fatalf("locked mismatch: ok=%v reason=%q", ok, reason)

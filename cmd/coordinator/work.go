@@ -1295,7 +1295,7 @@ func payoutAddressLockedReason(locked, submitted string) string {
 // checkClaimMinerIdentity binds claim pubkey/address to a locked worker payout.
 // When claimRequirePubKey is set (default under hybrid), miner_pubkey is mandatory.
 // When require is off, omitted identity is a legacy claim and does not touch the lock.
-// A presented pubkey that does not match the lock is still rejected.
+// A sticky payout lock is ONLY written from a verified pubkey — never from address hint alone.
 func (m *workManager) checkClaimMinerIdentity(workerID, pubHex, addrHint string) (ok bool, reason string) {
 	if m == nil {
 		return true, ""
@@ -1306,39 +1306,31 @@ func (m *workManager) checkClaimMinerIdentity(workerID, pubHex, addrHint string)
 
 	locked := m.lockedPayoutAddress(workerID)
 
-	// Hybrid/public pool: pubkey is mandatory. Address-only must NOT set the
-	// sticky payout lock — that lets a shared-token worker steal an unlocked
-	// worker_id's unpaid accrual without proving key possession.
 	if require && pubHex == "" {
 		return false, "claim_pubkey_required"
 	}
 
-	if pubHex == "" && addrHint == "" {
-		// Require-off (HACKME_POOL_CLAIM_REQUIRE_PUBKEY=0): legacy workers omit
-		// pubkey. A stored lock must not turn that omission into a 403 — the
-		// fleet would stop renewing leases after the first keyed claim.
+	if pubHex == "" {
+		// Legacy claim (require off): renew lease without establishing a lock from a
+		// forgeable miner_address hint. Still reject if a lock already exists and the
+		// hint disagrees (keeps sticky binding for keyed workers).
+		if addrHint != "" && locked != "" && !strings.EqualFold(locked, addrHint) {
+			return false, payoutAddressLockedReason(locked, addrHint)
+		}
 		return true, ""
 	}
-	derived := ""
-	if pubHex != "" {
-		var okAddr bool
-		derived, okAddr = deriveAddressFromPubHex(pubHex)
-		if !okAddr {
-			return false, "invalid_pubkey"
-		}
-		if addrHint != "" && !strings.EqualFold(addrHint, derived) {
-			return false, "pubkey_address_mismatch"
-		}
-	} else {
-		derived = addrHint
-		if !strings.HasPrefix(derived, "HMC-") || len(derived) != 20 {
-			return false, "invalid_miner_address"
-		}
+
+	derived, okAddr := deriveAddressFromPubHex(pubHex)
+	if !okAddr {
+		return false, "invalid_pubkey"
+	}
+	if addrHint != "" && !strings.EqualFold(addrHint, derived) {
+		return false, "pubkey_address_mismatch"
 	}
 	if locked != "" && !strings.EqualFold(locked, derived) {
 		return false, payoutAddressLockedReason(locked, derived)
 	}
-	if locked == "" && derived != "" {
+	if locked == "" {
 		m.notePayoutLock(workerID, derived)
 	}
 	return true, ""
