@@ -13,6 +13,8 @@ func TestIsLoopbackURL(t *testing.T) {
 		{"https://hackme.tech/pool", false},
 		{"http://127.0.0.1.attacker.example/", false},
 		{"http://evil.com/path?x=127.0.0.1", false},
+		{"http://127.0.0.1:8080@evil.example", false}, // report #24 userinfo spoof
+		{"http://localhost:99@evil.example/", false},
 		{"", false},
 	}
 	for _, tc := range cases {

@@ -22,6 +22,8 @@ func IsLoopbackHost(host string) bool {
 
 // IsLoopbackURL reports whether u's hostname is loopback (http/https URLs).
 // Unlike substring Contains checks, hosts like 127.0.0.1.attacker.example are NOT loopback.
+// Userinfo is rejected: forms like http://127.0.0.1:8080@evil.example dial evil.example
+// while a naive string-slicer can mis-read the userinfo as the host (report #24).
 func IsLoopbackURL(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -29,6 +31,9 @@ func IsLoopbackURL(raw string) bool {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
+		return false
+	}
+	if u.User != nil && u.User.String() != "" {
 		return false
 	}
 	host := u.Hostname()

@@ -12,6 +12,10 @@ func TestWizardRefusesPublicBase(t *testing.T) {
 	if fuzzingcli.IsLoopbackBase("https://hackme.tech") {
 		t.Fatal("hackme.tech must not be loopback")
 	}
+	// Report #24: userinfo bypass of the wizard gate.
+	if fuzzingcli.IsLoopbackBase("http://127.0.0.1:8080@evil.example") {
+		t.Fatal("userinfo spoof must not pass wizard loopback gate")
+	}
 }
 
 func TestWizardDryRunScanPackage(t *testing.T) {

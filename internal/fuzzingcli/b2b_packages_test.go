@@ -53,7 +53,21 @@ func TestIsLoopbackBase(t *testing.T) {
 	if !IsLoopbackBase("http://127.0.0.1:8080") {
 		t.Fatal("127.0.0.1 should be loopback")
 	}
+	if !IsLoopbackBase("http://localhost:8080") {
+		t.Fatal("localhost should be loopback")
+	}
 	if IsLoopbackBase("https://hackme.tech") {
 		t.Fatal("hackme.tech should not be loopback")
+	}
+	// Report #24: userinfo must not spoof loopback (real dial host is after @).
+	for _, bad := range []string{
+		"http://127.0.0.1:8080@evil.example",
+		"http://localhost:99@evil.example",
+		"http://127.0.0.1:8080@evil.example/",
+		"http://localhost:99@evil.example/",
+	} {
+		if IsLoopbackBase(bad) {
+			t.Fatalf("userinfo spoof must be blocked: %q", bad)
+		}
 	}
 }

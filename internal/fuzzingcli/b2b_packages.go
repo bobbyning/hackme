@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"hackme/internal/fuzzengine"
+	"hackme/internal/netutil"
 )
 
 // B2BPackage is a customer-facing fuzz tier (Scan / Audit / Deep).
@@ -92,22 +93,8 @@ func B2BPackageFor(name string) (B2BPackage, error) {
 }
 
 // IsLoopbackBase returns true when API base is safe for order/escrow creation.
+// Delegates to netutil.IsLoopbackURL (real URL parse) — never slice on ':' /
+// userinfo, which previously let http://127.0.0.1:8080@evil.example pass (report #24).
 func IsLoopbackBase(base string) bool {
-	b := strings.TrimSpace(strings.ToLower(base))
-	b = strings.TrimPrefix(b, "http://")
-	b = strings.TrimPrefix(b, "https://")
-	b = strings.TrimSuffix(b, "/")
-	if i := strings.IndexByte(b, '/'); i >= 0 {
-		b = b[:i]
-	}
-	host := b
-	if j := strings.LastIndexByte(b, ':'); j >= 0 {
-		host = b[:j]
-	}
-	switch host {
-	case "127.0.0.1", "localhost", "::1":
-		return true
-	default:
-		return false
-	}
+	return netutil.IsLoopbackURL(base)
 }
