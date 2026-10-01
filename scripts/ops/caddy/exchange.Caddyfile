@@ -25,12 +25,22 @@
 		}
 	}
 
-	# Never expose matching API on public edge
-	respond /api/* 404
-	respond /lab/* 404
-	respond /admin/* 404
-	respond /health 404
-	respond /openapi.yaml 404
+	# Never expose matching API on public paper host
+	handle /api/* {
+		respond 404
+	}
+	handle /lab/* {
+		respond 404
+	}
+	handle /admin/* {
+		respond 404
+	}
+	handle /health {
+		respond 404
+	}
+	handle /openapi.yaml {
+		respond 404
+	}
 
 	handle {
 		root * /var/www/exchange
@@ -40,7 +50,7 @@
 			Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 			X-Content-Type-Options nosniff
 			# Hub iframe: allow hackme.tech + local dashboard; never X-Frame-Options SAMEORIGIN
-			Content-Security-Policy "default-src 'self'; script-src 'self' blob: https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://hackme.tech; connect-src 'self' https://hackme.tech https://api.binance.com https://cloudflareinsights.com; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080"
+			Content-Security-Policy "default-src 'self'; script-src 'self' blob: https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://hackme.tech; connect-src 'self' https://hackme.tech https://exchange-api.hackme.tech https://api.binance.com https://cloudflareinsights.com; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self' https://hackme.tech http://127.0.0.1:8080 http://localhost:8080"
 			Referrer-Policy strict-origin-when-cross-origin
 			Permissions-Policy "geolocation=(), microphone=(), camera=()"
 			Cross-Origin-Opener-Policy same-origin
@@ -68,4 +78,28 @@ exchange.hackme.tech {
 
 :88, :8444 {
 	respond "gone" 410
+}
+
+# --- public desk API (HOLD: matching/deposit/withdraw OFF) ---
+# Preferred: exchange-api.hackme.tech (CF Universal SSL *.hackme.tech).
+# api.exchange.hackme.tech: DNS-only / LE on origin.
+exchange-api.hackme.tech, api.exchange.hackme.tech {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		-Server
+	}
+	map {header.CF-Connecting-IP} {desk_client_ip} {
+		"" {remote_host}
+		default {header.CF-Connecting-IP}
+	}
+	reverse_proxy 127.0.0.1:18444 {
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {desk_client_ip}
+		header_up X-Real-IP {desk_client_ip}
+	}
 }

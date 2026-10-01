@@ -3,6 +3,13 @@
 **Origin** is Caddy on `89.150.41.40` (`scripts/ops/caddy/exchange.Caddyfile`), not the
 legacy nginx sketch in `scripts/ops/nginx/hackme-exchange-domain.tls.conf`.
 
+**Mining hub (`132.243…`):** do **not** enable `hackme-exchange-domain.conf` in
+`sites-enabled`. A hard-coded `proxy_pass https://hackme.tech` fails `nginx -t` /
+start when DNS flaps and takes down pool/coordinator with it. Paper SPA + public
+desk API live only on the exchange origin VPS. If a local sketch is required,
+use `resolver` + variable `proxy_pass` (see the reference conf) — still prefer
+keeping the site disabled.
+
 Required HTTP response headers (browsers ignore `frame-ancestors` in `<meta>`):
 
 - `Content-Security-Policy` with
