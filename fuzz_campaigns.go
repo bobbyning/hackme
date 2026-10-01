@@ -987,10 +987,18 @@ func (a *app) tryCloseFuzzEscrowForStatus(ctx context.Context, campaignID, statu
 	}
 	switch strings.TrimSpace(strings.ToLower(status)) {
 	case "cancelled":
+		// Same drain-before-close as completed (report #23 V1): Cancel refunds
+		// runsPool-runsPaid from local accounting and then permanently blocks
+		// unpaid outbox rows via ErrFuzzEscrowClosed.
+		if err := a.pullFuzzSettleOutbox(ctx); err != nil {
+			log.Printf("fuzz escrow: refuse cancel %s: settle pull failed: %v", logsafe.ID(campaignID), err)
+			return
+		}
 		_, _ = a.chain.CancelFuzzEscrow(ctx, campaignID)
 	case "completed":
 		// Drain run/finding settles first so Finalize does not refund unpaid work.
-		// A failed pull must not finalize: pending worker payouts would hit a closed escrow (report #12).
+		// A failed pull must not finalize: pending worker payouts would hit a closed escrow
+		// (report #12 / #23 — silent no-op pull must not count as drained).
 		if err := a.pullFuzzSettleOutbox(ctx); err != nil {
 			log.Printf("fuzz escrow: refuse finalize %s: settle pull failed: %v", logsafe.ID(campaignID), err)
 			return

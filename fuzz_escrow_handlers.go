@@ -114,10 +114,16 @@ func (a *app) handleFuzzEscrowCleanupStale(w http.ResponseWriter, r *http.Reques
 		var err error
 		for attempt := 0; attempt < 5; attempt++ {
 			switch strings.TrimSpace(strings.ToLower(item.cStatus)) {
-			case "cancelled":
-				row, err = a.chain.CancelFuzzEscrow(ctx, item.id)
-			case "completed":
-				row, err = a.chain.FinalizeFuzzEscrow(ctx, item.id)
+			case "cancelled", "completed":
+				// Drain settle outbox before cancel/finalize (report #23).
+				if err = a.pullFuzzSettleOutbox(ctx); err != nil {
+					break
+				}
+				if strings.EqualFold(item.cStatus, "cancelled") {
+					row, err = a.chain.CancelFuzzEscrow(ctx, item.id)
+				} else {
+					row, err = a.chain.FinalizeFuzzEscrow(ctx, item.id)
+				}
 			default:
 				err = nil
 			}

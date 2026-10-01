@@ -23,11 +23,17 @@ type SettleOutboxItem struct {
 }
 
 // FetchSettleOutbox returns pending settlements from the coordinator.
+// When a coordinator URL is configured but the admin token is missing, this
+// returns an error (not a silent empty success): callers that close escrow
+// must not treat "no token" as "fully drained" (report #23).
 func FetchSettleOutbox(ctx context.Context, limit int) ([]SettleOutboxItem, error) {
 	coordURL := ResolveCoordinatorURL()
 	token := CoordinatorAdminToken()
-	if coordURL == "" || token == "" {
+	if coordURL == "" {
 		return nil, nil
+	}
+	if token == "" {
+		return nil, fmt.Errorf("settle outbox: coordinator admin token required")
 	}
 	if limit <= 0 || limit > 500 {
 		limit = 64

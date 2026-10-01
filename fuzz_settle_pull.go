@@ -67,11 +67,12 @@ func (a *app) pullFuzzSettleOutbox(ctx context.Context) error {
 			acked = append(acked, it.ID)
 		}
 		if len(acked) == 0 {
-			// Head of queue is all foreign to this node — stop spinning this tick.
+			// Head of queue is all foreign / stuck — do not pretend the outbox is drained.
+			// Returning an error blocks escrow finalize/cancel (report #23 V2b).
 			if localHits == 0 {
 				log.Printf("fuzz settle pull: %d outbox row(s) not local to this node (head blocked)", len(items))
 			}
-			break
+			return fmt.Errorf("fuzz settle pull: outbox not drained (%d pending, local_hits=%d)", len(items), localHits)
 		}
 		if err := poolsync.AckSettleOutbox(ctx, acked); err != nil {
 			log.Printf("fuzz settle pull: ack: %v", err)
