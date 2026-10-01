@@ -23,6 +23,24 @@ const (
 	workStatusReplayPending    = "replay_pending"
 )
 
+// huntClaimRank ranks worker crash/sanitizer claims for report #25 anti-burial.
+// Higher is stronger; clean/empty is 0.
+func huntClaimRank(checkResult int32, trap string) int {
+	trap = strings.TrimSpace(trap)
+	if checkResult != 0 && strings.HasPrefix(trap, "hunt_crash:") {
+		return 2
+	}
+	if checkResult != 0 && strings.HasPrefix(trap, "hunt_sanitizer:") {
+		return 1
+	}
+	return 0
+}
+
+// huntClaimWouldWeaken is true when a re-submit replaces a crash/sanitizer claim with a weaker one.
+func huntClaimWouldWeaken(oldCR int32, oldTrap string, newCR int32, newTrap string) bool {
+	return huntClaimRank(newCR, newTrap) < huntClaimRank(oldCR, oldTrap)
+}
+
 type huntReplayJob struct {
 	ID                int64
 	CampaignID        string
@@ -225,14 +243,30 @@ func (s *Service) enqueueHuntReplay(ctx context.Context, req SubmitRequest, inpu
 		case workStatusReplayPending:
 			// Reject payout/trap hijack from a different worker while replay is pending.
 			var qWorker, qMiner string
+			var qCR int32
+			var qTrap, qStatus string
 			_ = tx.QueryRowContext(ctx,
-				`SELECT COALESCE(worker_id,''), COALESCE(miner_address,'') FROM fuzz_hunt_replay_queue
-				 WHERE campaign_id=? AND item_id=?`, req.CampaignID, req.ItemID).Scan(&qWorker, &qMiner)
+				`SELECT COALESCE(worker_id,''), COALESCE(miner_address,''),
+				        COALESCE(worker_check_result,0), COALESCE(worker_trap,''), COALESCE(status,'')
+				 FROM fuzz_hunt_replay_queue
+				 WHERE campaign_id=? AND item_id=?`, req.CampaignID, req.ItemID).
+				Scan(&qWorker, &qMiner, &qCR, &qTrap, &qStatus)
 			if qWorker != "" && qWorker != strings.TrimSpace(req.WorkerID) {
 				return SubmitOutcome{}, fmt.Errorf("poolfuzz: hunt replay already claimed by another worker")
 			}
 			if qMiner != "" && miner != "" && qMiner != miner {
 				return SubmitOutcome{}, fmt.Errorf("poolfuzz: hunt replay miner_address mismatch")
+			}
+			// Report #25: forged worker_id passes the ownership guard; refuse claim
+			// weakening (crash/sanitizer → clean) so a confirmed finding cannot be buried.
+			if huntClaimWouldWeaken(qCR, qTrap, req.CheckResult, req.Trap) {
+				return SubmitOutcome{}, fmt.Errorf("poolfuzz: hunt replay refuse claim weakening")
+			}
+			qStatus = strings.TrimSpace(strings.ToLower(qStatus))
+			if qStatus == huntReplayStatusProcessing {
+				if qCR != req.CheckResult || strings.TrimSpace(qTrap) != strings.TrimSpace(req.Trap) {
+					return SubmitOutcome{}, fmt.Errorf("poolfuzz: hunt replay busy")
+				}
 			}
 			qid, err := s.ensureHuntReplayQueueRowTx(ctx, tx, req, inputN, miner, now)
 			if err != nil {
@@ -295,7 +329,7 @@ func (s *Service) ensureHuntReplayQueueRowTx(ctx context.Context, tx *sql.Tx, re
 		     ELSE excluded.duration_ms
 		   END,
 		   status=CASE
-		     WHEN fuzz_hunt_replay_queue.status IN ('done','failed') THEN fuzz_hunt_replay_queue.status
+		     WHEN fuzz_hunt_replay_queue.status IN ('done','failed','processing') THEN fuzz_hunt_replay_queue.status
 		     ELSE 'pending'
 		   END,
 		   last_error=CASE

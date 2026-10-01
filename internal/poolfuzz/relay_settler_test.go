@@ -182,3 +182,82 @@ func TestRelaySettlerRejectsNonHTTPDefaultOrdersURL(t *testing.T) {
 		t.Fatalf("file:// must be rejected, got base=%q", base)
 	}
 }
+
+func TestSafeSettleBaseURLRejectsUserinfo(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"https://settler.example", true},
+		{"http://127.0.0.1:18080", true},
+		{"file:///etc/passwd", false},
+		{"gopher://x", false},
+		{"http://127.0.0.1@evil.example/", false},
+		{"https://user:pass@evil.example/", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := safeSettleBaseURL(tc.in); got != tc.want {
+			t.Fatalf("safeSettleBaseURL(%q)=%v want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestDrainPendingSettleHTTPSkipsFinalizeAfterPayFail(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "drain-skip.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := &Service{DB: db}
+	if err := svc.RegisterCampaign(ctx, Campaign{
+		ID: "drain-camp", CampaignType: "property", Status: "running", BudgetRuns: 2,
+		Config: map[string]any{"orders_settle_pull": false},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runID, err := svc.EnqueueSettleOutbox(ctx, "run", "drain-camp", "HMC-2222222222222222", "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finID, err := svc.EnqueueSettleOutbox(ctx, "finalize", "drain-camp", "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seenFinalize atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		kind, _ := body["kind"].(string)
+		if strings.EqualFold(kind, "finalize") || strings.EqualFold(kind, "close") {
+			seenFinalize.Store(true)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		// Fail run pays so finalize must be skipped in the same drain.
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`pay fail`))
+	}))
+	defer server.Close()
+	relay := &RelaySettler{
+		Service:          svc,
+		DefaultOrdersURL: server.URL,
+		AdminToken:       func() string { return "tok" },
+		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
+	}
+	_, _, err = relay.DrainPendingSettleHTTP(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenFinalize.Load() {
+		t.Fatal("finalize must not HTTP-relay after pay failure in same drain")
+	}
+	stRun, _ := svc.SettleOutboxStatus(ctx, runID)
+	stFin, _ := svc.SettleOutboxStatus(ctx, finID)
+	if stRun != "pending" || stFin != "pending" {
+		t.Fatalf("both must stay pending, run=%q finalize=%q", stRun, stFin)
+	}
+}

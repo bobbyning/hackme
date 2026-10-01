@@ -106,6 +106,11 @@ func (tx HmsTransferTx) HashHex() (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// CanonicalBytes is the ed25519 signing payload for HMS transfers.
+func (tx HmsTransferTx) CanonicalBytes() ([]byte, error) {
+	return tx.canonicalBytes()
+}
+
 func ValidateHmsTransferShape(tx HmsTransferTx) (code, msg string) {
 	if tx.TxType != "transfer_hms_v1" {
 		return "invalid_tx_type", "tx_type must be transfer_hms_v1"

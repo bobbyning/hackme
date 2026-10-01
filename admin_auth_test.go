@@ -9,6 +9,20 @@ import (
 	"testing"
 )
 
+func TestCanonicalRelayAdminTokenNeverFallsBackToNodeAdmin(t *testing.T) {
+	t.Setenv("HACKME_ADMIN_TOKEN", "local-node-admin-secret")
+	t.Setenv("HACKME_CANONICAL_RELAY_ADMIN_TOKEN", "")
+	req := httptest.NewRequest(http.MethodPost, "/api/tx/send", nil)
+	req.Header.Set("X-Hackme-Admin-Token", "local-node-admin-secret")
+	if got := canonicalRelayAdminToken(req); got != "" {
+		t.Fatalf("must not exfil local admin (or client=local) as relay token, got %q", got)
+	}
+	t.Setenv("HACKME_CANONICAL_RELAY_ADMIN_TOKEN", "explicit-relay-only")
+	if got := canonicalRelayAdminToken(req); got != "explicit-relay-only" {
+		t.Fatalf("explicit relay token: got %q", got)
+	}
+}
+
 func TestRequestFromLoopbackUsesRemoteAddrNotHost(t *testing.T) {
 	req := httptestReq(t, "127.0.0.1:54321", "evil.example")
 	if !requestFromLoopback(req) {

@@ -56,3 +56,25 @@ func LooksRemoteCoordinatorURL(raw string) bool {
 	}
 	return !IsLoopbackURL(raw)
 }
+
+// SafeHTTPBaseURL reports whether raw is an http(s) URL with a host and no userinfo.
+// Used for coordinator / settle bases so credentials are never dialed to userinfo hosts.
+func SafeHTTPBaseURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if u.User != nil && u.User.String() != "" {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return true
+	default:
+		return false
+	}
+}
