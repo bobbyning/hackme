@@ -260,11 +260,10 @@
       "title": "libexpat/libexpat · XML_Parse",
       "driver": "expat_stdin",
       "upstream_src": [
+        "expat/lib/xcs.c",
         "expat/lib/xmlparse.c",
         "expat/lib/xmltok.c",
         "expat/lib/xmlrole.c",
-        "expat/lib/xmltok_impl.c",
-        "expat/lib/xmltok_ns.c",
         "expat/lib/random_getrandom.c"
       ],
       "include_dirs": [

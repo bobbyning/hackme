@@ -49,6 +49,25 @@ func TestFuzzSettleOutboxDrainOnErr(t *testing.T) {
 	}
 }
 
+func TestFuzzSettleSkipFinalizeAfterPayFail(t *testing.T) {
+	failed := map[string]bool{"camp-a": true}
+	if !fuzzSettleSkipFinalizeAfterPayFail("finalize", "camp-a", failed) {
+		t.Fatal("finalize must skip after pay fail")
+	}
+	if !fuzzSettleSkipFinalizeAfterPayFail("CLOSE", "camp-a", failed) {
+		t.Fatal("close must skip after pay fail")
+	}
+	if fuzzSettleSkipFinalizeAfterPayFail("run", "camp-a", failed) {
+		t.Fatal("run must not skip")
+	}
+	if fuzzSettleSkipFinalizeAfterPayFail("finalize", "camp-b", failed) {
+		t.Fatal("other campaign finalize must proceed")
+	}
+	if fuzzSettleSkipFinalizeAfterPayFail("finalize", "camp-a", nil) {
+		t.Fatal("nil map must not skip")
+	}
+}
+
 func TestApplyLocalFuzzSettleOnceNoDoublePay(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(filepath.Join(t.TempDir(), "pull.db"))

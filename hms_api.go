@@ -113,6 +113,17 @@ func (a *app) handleHMSTransferSend(w http.ResponseWriter, r *http.Request) {
 	if simpleSign && !a.allowLoopbackAdminTxSend(r) && !a.allowLoopbackDesktopDashboardAuth(r) && !requireAdminAuthStrict(w, r) {
 		return
 	}
+	// Followers must not write HMS to a local fork (no canonical HMS relay yet).
+	if a.shouldUseCanonicalChainAPI() {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"code":  "hms_canonical_required",
+			"error": "HMS transfers must run on the chain host (canonical HMS relay not enabled on followers)",
+		})
+		return
+	}
 	if simpleSign {
 		if strings.TrimSpace(tx.From) == "" && a.signer != nil {
 			tx.From = strings.TrimSpace(a.signer.Address())
@@ -124,6 +135,30 @@ func (a *app) handleHMSTransferSend(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]any{"ok": false, "code": code, "error": msg})
 			return
 		}
+		if a.signer == nil {
+			writeJSON(w, map[string]any{"ok": false, "code": "signer_unavailable", "error": "node signer unavailable"})
+			return
+		}
+		from := strings.TrimSpace(tx.From)
+		signerAddr := strings.TrimSpace(a.signer.Address())
+		if from == "" {
+			tx.From = signerAddr
+		} else if !strings.EqualFold(from, signerAddr) {
+			writeJSON(w, map[string]any{"ok": false, "code": "address_pubkey_mismatch", "error": "simple signing allowed only for node wallet address"})
+			return
+		}
+		if tx.Nonce == 0 {
+			if st, err := a.chain.HmsAddressState(r.Context(), tx.From); err == nil {
+				tx.Nonce = st.HMSNextNonce
+			}
+		}
+		tx.PubKeyEd25519 = strings.TrimSpace(a.signer.PublicKeyHex())
+		canon, err := tx.CanonicalBytes()
+		if err != nil {
+			writeJSON(w, map[string]any{"ok": false, "code": "invalid_tx_encoding", "error": "invalid tx canonical payload"})
+			return
+		}
+		tx.SigEd25519 = strings.TrimSpace(a.signer.SignHex(canon))
 	}
 	txHash, status, err := a.chain.SubmitHmsTransferTx(r.Context(), tx)
 	if err != nil {

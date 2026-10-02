@@ -47,12 +47,20 @@ func (a *app) pullFuzzSettleOutbox(ctx context.Context) error {
 			}
 		}
 		ordered = append(ordered, finals...)
+		payFailed := map[string]bool{}
 		for _, it := range ordered {
 			st, local := a.localFuzzEscrowStatus(ctx, it.CampaignID)
 			if !local {
 				continue
 			}
 			localHits++
+			kind := strings.TrimSpace(strings.ToLower(it.Kind))
+			// Do not finalize/close a campaign in the same pass after a non-drainable
+			// pay failure — that refunds while unpaid rows stay pending forever.
+			if fuzzSettleSkipFinalizeAfterPayFail(kind, it.CampaignID, payFailed) {
+				log.Printf("fuzz settle pull: skip %s for %s after pay failure in batch", kind, it.CampaignID)
+				continue
+			}
 			apply, drain := fuzzSettleOutboxAction(st, it.Kind)
 			if drain {
 				acked = append(acked, it.ID)
@@ -67,9 +75,15 @@ func (a *app) pullFuzzSettleOutbox(ctx context.Context) error {
 					continue
 				}
 				log.Printf("fuzz settle pull: campaign %s kind %s: %v", it.CampaignID, it.Kind, err)
+				if kind != "finalize" && kind != "close" {
+					payFailed[it.CampaignID] = true
+				}
 				continue
 			}
 			acked = append(acked, it.ID)
+		}
+		if len(payFailed) > 0 && len(acked) == 0 {
+			return fmt.Errorf("fuzz settle pull: pay failures blocked drain (%d campaign(s))", len(payFailed))
 		}
 		if len(acked) == 0 {
 			// Head of queue is all foreign / stuck — do not pretend the outbox is drained.
@@ -141,6 +155,15 @@ func fuzzSettleOutboxDrainOnErr(err error) bool {
 	// (C-01). Depleted / already-paid are terminal no-ops safe to ACK.
 	return errors.Is(err, chain.ErrFuzzEscrowDepleted) ||
 		errors.Is(err, chain.ErrFuzzEscrowAlreadyPaid)
+}
+
+// fuzzSettleSkipFinalizeAfterPayFail blocks same-batch refund after a stuck payout.
+func fuzzSettleSkipFinalizeAfterPayFail(kind, campaignID string, payFailed map[string]bool) bool {
+	kind = strings.TrimSpace(strings.ToLower(kind))
+	if kind != "finalize" && kind != "close" {
+		return false
+	}
+	return payFailed[strings.TrimSpace(campaignID)]
 }
 
 // applyLocalFuzzSettleOnce credits at most once per stable outbox event ID.

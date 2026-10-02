@@ -173,8 +173,25 @@ func (r *RelaySettler) DrainPendingSettleHTTP(ctx context.Context, limit int) (a
 	if err != nil {
 		return 0, 0, err
 	}
-	tok := r.token()
+	// Mirror pull-mode: pays before finalize; skip finalize after a failed pay in-batch.
+	ordered := make([]SettleOutboxItem, 0, len(items))
+	var finals []SettleOutboxItem
 	for _, it := range items {
+		k := strings.TrimSpace(strings.ToLower(it.Kind))
+		if k == "finalize" || k == "close" {
+			finals = append(finals, it)
+		} else {
+			ordered = append(ordered, it)
+		}
+	}
+	ordered = append(ordered, finals...)
+	payFailed := map[string]bool{}
+	tok := r.token()
+	for _, it := range ordered {
+		kind := strings.TrimSpace(strings.ToLower(it.Kind))
+		if (kind == "finalize" || kind == "close") && payFailed[it.CampaignID] {
+			continue
+		}
 		base, pull := r.resolveSettleBase(ctx, it.CampaignID)
 		if pull || base == "" || tok == "" {
 			continue
@@ -183,6 +200,10 @@ func (r *RelaySettler) DrainPendingSettleHTTP(ctx context.Context, limit int) (a
 		res, relErr := r.httpRelayOnce(ctx, s, it.Kind, it.CampaignID, it.MinerAddress, it.Severity, it.ID, base, tok)
 		if relErr == nil && res.Applied {
 			applied++
+			continue
+		}
+		if kind != "finalize" && kind != "close" {
+			payFailed[it.CampaignID] = true
 		}
 	}
 	return attempted, applied, nil
@@ -213,15 +234,10 @@ func (r *RelaySettler) resolveSettleBase(ctx context.Context, campaignID string)
 	return base, isLoopbackSettleURL(base)
 }
 
-// safeSettleBaseURL rejects non-http(s) and empty schemes so DefaultOrdersURL cannot be
-// turned into file:// / gopher:// style SSRF by misconfiguration.
+// safeSettleBaseURL rejects non-http(s), userinfo spoofs, and empty schemes so
+// DefaultOrdersURL cannot become file:// / gopher:// / http://127.0.0.1@evil SSRF.
 func safeSettleBaseURL(u string) bool {
-	u = strings.TrimSpace(u)
-	if u == "" {
-		return false
-	}
-	low := strings.ToLower(u)
-	return strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://")
+	return netutil.SafeHTTPBaseURL(u)
 }
 
 func truthy(v any) bool {

@@ -153,16 +153,17 @@ func desktopMutatingOriginOK(r *http.Request) bool {
 		(rh == "localhost" && (oh == "127.0.0.1" || oh == "::1"))
 }
 
-// coordinatorTokenFromSecrets loads the pool coordinator admin token (not the node HACKME_ADMIN_TOKEN).
-func coordinatorTokenFromSecrets() string {
-	return operator.ReadCoordinatorAdminToken()
+// coordinatorWorkerTokenFromSecrets loads the pool miner/worker token (not admin).
+func coordinatorWorkerTokenFromSecrets() string {
+	return operator.ReadCoordinatorWorkerToken()
 }
 
 func ensurePoolCoordinatorTokenEnv() {
 	if strings.TrimSpace(os.Getenv("HACKME_POOL_COORDINATOR_TOKEN")) != "" {
 		return
 	}
-	if t := coordinatorTokenFromSecrets(); t != "" {
+	// Never promote admin settle/register token into the worker-scoped env.
+	if t := coordinatorWorkerTokenFromSecrets(); t != "" {
 		_ = os.Setenv("HACKME_POOL_COORDINATOR_TOKEN", t)
 	}
 }
@@ -187,17 +188,16 @@ func requestFromLoopback(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// canonicalRelayAdminToken is used when desktop forwards a signed transfer to hackme.tech (remote still requires admin on older builds).
-func canonicalRelayAdminToken(r *http.Request) string {
-	if t := strings.TrimSpace(os.Getenv("HACKME_CANONICAL_RELAY_ADMIN_TOKEN")); t != "" {
-		return t
-	}
-	if r != nil {
-		if t := strings.TrimSpace(extractAdminSecret(r)); t != "" {
-			return t
-		}
-	}
-	return adminTokenFromEnv()
+// canonicalRelayAdminToken returns an explicit relay credential for forwarding
+// signed transfers to the canonical chain URL.
+//
+// Never falls back to HACKME_ADMIN_TOKEN or the client Authorization header —
+// that exfils the node admin secret to the canonical host (or a MITM /
+// mis-set HACKME_CANONICAL_CHAIN_URL). Fully signed mempool txs do not need
+// admin on current public /api/tx/send; set HACKME_CANONICAL_RELAY_ADMIN_TOKEN
+// only when the remote still requires it (desktop_mode_up.sh can sync it).
+func canonicalRelayAdminToken(_ *http.Request) string {
+	return strings.TrimSpace(os.Getenv("HACKME_CANONICAL_RELAY_ADMIN_TOKEN"))
 }
 
 // desktopAdminTokenEmbedScript returns an inline script that sets
@@ -250,13 +250,13 @@ func handleDesktopLocalAuth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// resolveCoordinatorToken picks the coordinator bearer token. Never falls back to HACKME_ADMIN_TOKEN
-// (that causes claim 401 on public pool).
+// resolveCoordinatorToken picks the coordinator worker bearer token. Never falls back to
+// HACKME_ADMIN_TOKEN (claim 401) or the coordinator admin settle/register secret.
 func resolveCoordinatorToken(reqCoordToken string) string {
 	if t := strings.TrimSpace(os.Getenv("HACKME_POOL_COORDINATOR_TOKEN")); t != "" {
 		return t
 	}
-	if t := coordinatorTokenFromSecrets(); t != "" {
+	if t := coordinatorWorkerTokenFromSecrets(); t != "" {
 		return t
 	}
 	rt := strings.TrimSpace(reqCoordToken)
@@ -265,6 +265,10 @@ func resolveCoordinatorToken(reqCoordToken string) string {
 	}
 	admin := adminTokenFromEnv()
 	if admin != "" && secretsEqualConstantTime(rt, admin) {
+		return ""
+	}
+	// Reject coordinator admin secret pasted as "worker" token.
+	if adm := operator.ReadCoordinatorAdminToken(); adm != "" && secretsEqualConstantTime(rt, adm) {
 		return ""
 	}
 	return rt
