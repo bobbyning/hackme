@@ -8,10 +8,20 @@ import (
 )
 
 const coordinatorAdminTokenFile = "hackme_coordinator_admin_token"
+const coordinatorWorkerTokenFile = "hackme_coordinator_worker_token"
 
 // CoordinatorAdminTokenPaths returns candidate paths for the pool coordinator admin token.
 func CoordinatorAdminTokenPaths() []string {
-	secretName := filepath.Join(".secrets", coordinatorAdminTokenFile)
+	return coordinatorTokenPaths(coordinatorAdminTokenFile)
+}
+
+// CoordinatorWorkerTokenPaths returns candidate paths for the pool miner/worker token.
+func CoordinatorWorkerTokenPaths() []string {
+	return coordinatorTokenPaths(coordinatorWorkerTokenFile)
+}
+
+func coordinatorTokenPaths(secretFile string) []string {
+	secretName := filepath.Join(".secrets", secretFile)
 	var paths []string
 	seen := make(map[string]struct{})
 	add := func(p string) {
@@ -76,7 +86,17 @@ func openSecretFile(path string) ([]byte, error) {
 // ReadCoordinatorAdminToken loads the first line from .secrets/hackme_coordinator_admin_token.
 // Skips world/group-readable files and symlinks (H51).
 func ReadCoordinatorAdminToken() string {
-	for _, p := range CoordinatorAdminTokenPaths() {
+	return readCoordinatorTokenFile(CoordinatorAdminTokenPaths())
+}
+
+// ReadCoordinatorWorkerToken loads the first line from .secrets/hackme_coordinator_worker_token.
+// Never confuse this with the admin settle/register token.
+func ReadCoordinatorWorkerToken() string {
+	return readCoordinatorTokenFile(CoordinatorWorkerTokenPaths())
+}
+
+func readCoordinatorTokenFile(paths []string) string {
+	for _, p := range paths {
 		b, err := openSecretFile(p)
 		if err != nil {
 			continue

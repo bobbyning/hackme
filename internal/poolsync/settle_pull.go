@@ -65,10 +65,16 @@ func FetchSettleOutbox(ctx context.Context, limit int) ([]SettleOutboxItem, erro
 
 // AckSettleOutbox marks coordinator outbox rows applied on the origin node.
 func AckSettleOutbox(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	coordURL := ResolveCoordinatorURL()
 	token := CoordinatorAdminToken()
-	if coordURL == "" || token == "" || len(ids) == 0 {
+	if coordURL == "" {
 		return nil
+	}
+	if token == "" {
+		return fmt.Errorf("settle outbox ack: coordinator admin token required")
 	}
 	body, _ := json.Marshal(map[string]any{"ids": ids})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,

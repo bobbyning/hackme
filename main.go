@@ -2435,6 +2435,16 @@ func (a *app) handleWorkerStart(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if !netutil.SafeHTTPBaseURL(coordURL) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"code":  "coordinator_url_invalid",
+			"error": "coordinator url must be http(s) without userinfo",
+		})
+		return
+	}
 	workerID := strings.TrimSpace(req.WorkerID)
 	if workerID == "" {
 		workerID = strings.TrimSpace(os.Getenv("WORKER_ID"))
@@ -3907,12 +3917,9 @@ func (a *app) handleTransferSend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	canonicalBase := ""
-	// Loopback admin tx (settle_worker_payouts.sh) must use local SQLite nonce + mempool on the chain host.
-	// Desktop wallet sends also use loopback + admin token — must still relay to canonical, not local fork.
-	loopbackAdminSettle := a.allowLoopbackAdminTxSend(r) && !a.desktopCanonicalTransfersRequired()
-	// Match handleWalletEarnings: in network/follower mode keep submitting to canonical even if a stale
-	// local miner flag is set; otherwise POST falls through to empty SQLite and returns insufficient_balance.
-	if a.shouldUseCanonicalChainAPI() && !loopbackAdminSettle {
+	// Followers must always relay: loopback+admin settle belongs on the chain host,
+	// where shouldUseCanonicalChainAPI is already false (canonicalBaseIsSelfNode).
+	if a.shouldUseCanonicalChainAPI() {
 		if base := strings.TrimRight(strings.TrimSpace(a.canonicalChainBaseURL()), "/"); base != "" && !canonicalBaseWouldLoopbackProxy(r, base) {
 			canonicalBase = base
 		}
@@ -3924,18 +3931,13 @@ func (a *app) handleTransferSend(w http.ResponseWriter, r *http.Request) {
 			tx.From = from
 		}
 		if from != "" {
-			nonceOK := false
-			var canonNonce uint64
-			if _, _, cachedNonce, _, _, ok := a.readCanonicalWalletCache(from); ok {
-				tx.Nonce = cachedNonce
-				nonceOK = true
-			} else {
-				nonceCtx, nonceCancel := context.WithTimeout(context.Background(), 8*time.Second)
-				_, canonNonce, nonceOK = a.fetchCanonicalAddressState(nonceCtx, from)
-				nonceCancel()
-				if nonceOK {
-					tx.Nonce = canonNonce
-				}
+			// Always fresh-fetch nonce for simpleSign — wallet cache is display-only and
+			// a stale next_nonce yields pending_nonce_conflict under concurrent settles.
+			nonceCtx, nonceCancel := context.WithTimeout(context.Background(), 8*time.Second)
+			_, canonNonce, nonceOK := a.fetchCanonicalAddressState(nonceCtx, from)
+			nonceCancel()
+			if nonceOK {
+				tx.Nonce = canonNonce
 			}
 			if !nonceOK {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")

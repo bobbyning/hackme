@@ -18,6 +18,7 @@ import (
 	"hackme/internal/fuzzengine"
 	"hackme/internal/logsafe"
 	"hackme/internal/poolfuzz"
+	"hackme/internal/poolsync"
 )
 
 type fuzzCampaign struct {
@@ -994,6 +995,14 @@ func (a *app) tryCloseFuzzEscrowForStatus(ctx context.Context, campaignID, statu
 			log.Printf("fuzz escrow: refuse cancel %s: settle pull failed: %v", logsafe.ID(campaignID), err)
 			return
 		}
+		if pending, err := a.fuzzSettleOutboxPendingForCampaign(ctx, campaignID); err != nil || pending {
+			if err != nil {
+				log.Printf("fuzz escrow: refuse cancel %s: settle pending check: %v", logsafe.ID(campaignID), err)
+			} else {
+				log.Printf("fuzz escrow: refuse cancel %s: settle outbox still has rows for campaign", logsafe.ID(campaignID))
+			}
+			return
+		}
 		_, _ = a.chain.CancelFuzzEscrow(ctx, campaignID)
 	case "completed":
 		// Drain run/finding settles first so Finalize does not refund unpaid work.
@@ -1003,8 +1012,37 @@ func (a *app) tryCloseFuzzEscrowForStatus(ctx context.Context, campaignID, statu
 			log.Printf("fuzz escrow: refuse finalize %s: settle pull failed: %v", logsafe.ID(campaignID), err)
 			return
 		}
+		// Narrow TOCTOU: refuse refund if new outbox rows appeared for this campaign
+		// between the drain pass and close.
+		if pending, err := a.fuzzSettleOutboxPendingForCampaign(ctx, campaignID); err != nil || pending {
+			if err != nil {
+				log.Printf("fuzz escrow: refuse finalize %s: settle pending check: %v", logsafe.ID(campaignID), err)
+			} else {
+				log.Printf("fuzz escrow: refuse finalize %s: settle outbox still has rows for campaign", logsafe.ID(campaignID))
+			}
+			return
+		}
 		_, _ = a.chain.FinalizeFuzzEscrow(ctx, campaignID)
 	}
+}
+
+// fuzzSettleOutboxPendingForCampaign is true when the coordinator still has unpaid
+// settle rows for this campaign (post-drain TOCTOU guard).
+func (a *app) fuzzSettleOutboxPendingForCampaign(ctx context.Context, campaignID string) (bool, error) {
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID == "" || !poolSyncCoordinatorConfigured() {
+		return false, nil
+	}
+	items, err := poolsync.FetchSettleOutbox(ctx, 256)
+	if err != nil {
+		return false, err
+	}
+	for _, it := range items {
+		if strings.TrimSpace(it.CampaignID) == campaignID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func mergeRuntimeSummary(base map[string]any, req fuzzCampaignRuntimeUpdateRequest, heartbeatAt int64) map[string]any {

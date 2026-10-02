@@ -2324,6 +2324,7 @@ func (m *workManager) stats(includeDetails bool) map[string]any {
 		"hybrid_signer_enabled":        m.hybridSignerEnabled,
 		"hybrid_signer_strict":         m.hybridSignerStrict,
 		"hybrid_require_found_sig":     m.hybridRequireFoundSig,
+		"claim_require_pubkey":         m.claimRequirePubKey && m.hybridSignerEnabled,
 		"signed_submits_accepted":      m.signedAccepts,
 		"signed_submits_rejected":      m.signedRejects,
 		"last_signed_miner_address":    m.lastSignedMiner,

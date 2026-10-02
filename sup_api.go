@@ -194,8 +194,8 @@ func (a *app) handleSUPTransferSend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	canonicalBase := ""
-	loopbackAdminSettle := a.allowLoopbackAdminTxSend(r) && !a.desktopCanonicalTransfersRequired()
-	if a.shouldUseCanonicalChainAPI() && !loopbackAdminSettle {
+	// Followers must always relay (see handleTransferSend): no loopback-admin local-fork settle.
+	if a.shouldUseCanonicalChainAPI() {
 		if base := strings.TrimRight(strings.TrimSpace(a.canonicalChainBaseURL()), "/"); base != "" && !canonicalBaseWouldLoopbackProxy(r, base) {
 			canonicalBase = base
 		}
@@ -207,17 +207,11 @@ func (a *app) handleSUPTransferSend(w http.ResponseWriter, r *http.Request) {
 			tx.From = from
 		}
 		if from != "" {
-			nonceOK := false
-			if _, _, _, _, cachedSupNonce, ok := a.readCanonicalWalletCache(from); ok {
-				tx.Nonce = cachedSupNonce
-				nonceOK = true
-			} else {
-				nonceCtx, nonceCancel := context.WithTimeout(context.Background(), 8*time.Second)
-				_, canonSupNonce, nonceOK := a.fetchCanonicalSupTransferState(nonceCtx, from)
-				nonceCancel()
-				if nonceOK {
-					tx.Nonce = canonSupNonce
-				}
+			nonceCtx, nonceCancel := context.WithTimeout(context.Background(), 8*time.Second)
+			_, canonSupNonce, nonceOK := a.fetchCanonicalSupTransferState(nonceCtx, from)
+			nonceCancel()
+			if nonceOK {
+				tx.Nonce = canonSupNonce
 			}
 			if !nonceOK {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")

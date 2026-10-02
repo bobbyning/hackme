@@ -22,6 +22,28 @@ func TestReadCoordinatorAdminToken(t *testing.T) {
 	}
 }
 
+func TestReadCoordinatorWorkerTokenDoesNotLoadAdmin(t *testing.T) {
+	dir := t.TempDir()
+	secretDir := filepath.Join(dir, ".secrets")
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, coordinatorAdminTokenFile), []byte("admin-secret-only\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HACKME_REPO_ROOT", dir)
+	if got := ReadCoordinatorWorkerToken(); got != "" {
+		t.Fatalf("worker reader must not load admin file, got %q", got)
+	}
+	const want = "worker-token-value-xxxxxxxx"
+	if err := os.WriteFile(filepath.Join(secretDir, coordinatorWorkerTokenFile), []byte(want+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadCoordinatorWorkerToken(); got != want {
+		t.Fatalf("ReadCoordinatorWorkerToken()=%q want %q", got, want)
+	}
+}
+
 func TestReadCoordinatorAdminTokenRejectsWorldReadable(t *testing.T) {
 	dir := t.TempDir()
 	secretDir := filepath.Join(dir, ".secrets")

@@ -32,3 +32,24 @@ func TestLooksRemoteCoordinatorURL(t *testing.T) {
 		t.Fatal("public URL should look remote")
 	}
 }
+
+func TestSafeHTTPBaseURL(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"https://hackme.tech/pool/coordinator", true},
+		{"http://127.0.0.1:18081", true},
+		{"file:///etc/passwd", false},
+		{"gopher://x", false},
+		{"http://127.0.0.1@evil.example/", false},
+		{"https://user:pass@evil.example/", false},
+		{"", false},
+		{"not-a-url", false},
+	}
+	for _, tc := range cases {
+		if got := SafeHTTPBaseURL(tc.in); got != tc.want {
+			t.Fatalf("SafeHTTPBaseURL(%q)=%v want %v", tc.in, got, tc.want)
+		}
+	}
+}
