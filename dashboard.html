@@ -3424,7 +3424,7 @@
 					</div>
 				</div>
 
-				<!-- EXCHANGE (D0 paper SPA; loopback hub prefers local :5199 when up) -->
+				<!-- EXCHANGE (D0 paper SPA — always public exchange.hackme.tech) -->
 				<div id="panel-exchange" class="tab-panel">
 					<div id="exchange-chrome">
 						<span class="ex-title">Exchange</span>
@@ -3433,8 +3433,7 @@
 						<span id="exchange-lab-status" class="ex-meta">checking…</span>
 						<span class="ex-meta hidden sm:inline" id="exchange-origin-label">https://exchange.hackme.tech</span>
 						<span class="ml-auto flex flex-wrap gap-2 items-center">
-							<button type="button" id="btn-exchange-local" class="text-[10px] px-2.5 py-1 rounded border border-white/15 text-gray-400 hover:text-neon hover:border-neon/35 uppercase tracking-wider" title="Embed http://127.0.0.1:5199">Local</button>
-							<button type="button" id="btn-exchange-public" class="text-[10px] px-2.5 py-1 rounded border border-white/15 text-gray-400 hover:text-neon hover:border-neon/35 uppercase tracking-wider" title="Embed https://exchange.hackme.tech">Public</button>
+							<button type="button" id="btn-exchange-public" class="text-[10px] px-2.5 py-1 rounded border border-matrix/40 text-matrix hover:bg-matrix/10 uppercase tracking-wider" title="Embed https://exchange.hackme.tech" aria-pressed="true">Public</button>
 							<button type="button" data-goto-tab="wallet" class="text-[10px] px-2.5 py-1 rounded border border-white/15 text-gray-400 hover:text-neon hover:border-neon/35 uppercase tracking-wider">Wallet</button>
 							<button type="button" id="btn-exchange-reload" class="text-[10px] px-2.5 py-1 rounded border border-neon/30 text-neon hover:bg-neon/10 uppercase tracking-wider">Reload</button>
 							<a id="btn-exchange-popout" href="https://exchange.hackme.tech/" target="_blank" rel="noopener noreferrer" class="text-[10px] px-2.5 py-1 rounded border border-matrix/35 text-matrix hover:bg-matrix/10 uppercase tracking-wider no-underline">Pop out</a>
@@ -14681,35 +14680,17 @@
 			}
 		}
 
-		/** Exchange SPA embed — D0 paper host; loopback hub prefers local Vite :5199 when reachable. */
+		/** Exchange SPA embed — always public paper desk (exchange.hackme.tech). */
 		const EXCHANGE_SPA_ORIGIN_DEFAULT = 'https://exchange.hackme.tech';
-		const EXCHANGE_SPA_ORIGIN_LOCAL = 'http://127.0.0.1:5199';
 		const EXCHANGE_API_HEALTH_DEFAULT = 'http://127.0.0.1:18443/health';
 		const EXCHANGE_SPA_ORIGIN_ALLOW = [
 			'https://exchange.hackme.tech',
-			'http://127.0.0.1:5199',
-			'http://localhost:5199',
-			'http://[::1]:5199',
 		];
 		let exchangeFrameLoaded = false;
 		let exchangeResolvedOrigin = '';
 
-		function isLoopbackHostname(h) {
-			const x = String(h || '').toLowerCase();
-			return x === '127.0.0.1' || x === 'localhost' || x === '[::1]' || x === '::1';
-		}
-
 		function exchangeSpaOrigin() {
 			if (exchangeResolvedOrigin) return exchangeResolvedOrigin;
-			try {
-				const o = String(localStorage.getItem('hackme.exchange.origin') || '').replace(/\/$/, '');
-				if (o && EXCHANGE_SPA_ORIGIN_ALLOW.includes(o)) return o;
-				if (o && /^https?:\/\//i.test(o)) {
-					console.warn('[exchange] rejected non-allowlisted origin override:', o);
-				}
-			} catch (_) {}
-			// Loopback hub: default to local desk (public often fails to iframe from 127.0.0.1).
-			if (isLoopbackHostname(location.hostname)) return EXCHANGE_SPA_ORIGIN_LOCAL;
 			return EXCHANGE_SPA_ORIGIN_DEFAULT;
 		}
 
@@ -14741,26 +14722,15 @@
 		}
 
 		async function resolveExchangeSpaOrigin() {
+			// Migrate away from legacy Local (:5199) preference — hub embeds public only.
 			try {
 				const o = String(localStorage.getItem('hackme.exchange.origin') || '').replace(/\/$/, '');
-				// Honor explicit Local/Public preference — never clear Public just because :5199 is up.
-				if (o && EXCHANGE_SPA_ORIGIN_ALLOW.includes(o)) {
-					exchangeResolvedOrigin = o;
-					return o;
+				if (o && /127\.0\.0\.1:5199|localhost:5199|\[::1\]:5199/i.test(o)) {
+					localStorage.setItem('hackme.exchange.origin', EXCHANGE_SPA_ORIGIN_DEFAULT);
+				} else if (!o || !EXCHANGE_SPA_ORIGIN_ALLOW.includes(o)) {
+					localStorage.setItem('hackme.exchange.origin', EXCHANGE_SPA_ORIGIN_DEFAULT);
 				}
 			} catch (_) {}
-			if (isLoopbackHostname(location.hostname)) {
-				if (await probeOriginReachable(EXCHANGE_SPA_ORIGIN_LOCAL)) {
-					exchangeResolvedOrigin = EXCHANGE_SPA_ORIGIN_LOCAL;
-					return EXCHANGE_SPA_ORIGIN_LOCAL;
-				}
-				if (await probeOriginReachable(EXCHANGE_SPA_ORIGIN_DEFAULT)) {
-					exchangeResolvedOrigin = EXCHANGE_SPA_ORIGIN_DEFAULT;
-					return EXCHANGE_SPA_ORIGIN_DEFAULT;
-				}
-				exchangeResolvedOrigin = EXCHANGE_SPA_ORIGIN_LOCAL;
-				return EXCHANGE_SPA_ORIGIN_LOCAL;
-			}
 			exchangeResolvedOrigin = EXCHANGE_SPA_ORIGIN_DEFAULT;
 			return EXCHANGE_SPA_ORIGIN_DEFAULT;
 		}
@@ -14782,23 +14752,15 @@
 			let spaOk = false;
 			let apiOk = false;
 			spaOk = await probeOriginReachable(origin);
-			// Prefer same-origin Vite proxy when local desk is embedded (avoids CORS noise).
-			const healthCandidates = [];
-			if (/127\.0\.0\.1:5199|localhost:5199|\[::1\]:5199/i.test(origin)) {
-				healthCandidates.push(origin.replace(/\/$/, '') + '/exchange-api/health');
-			}
-			healthCandidates.push(EXCHANGE_API_HEALTH_DEFAULT);
-			for (const url of healthCandidates) {
-				try {
-					const hr = await fetch(url, { method: 'GET', cache: 'no-store', mode: 'cors' });
-					if (hr.ok) { apiOk = true; break; }
-				} catch (_) { /* try next */ }
-			}
-			const local = /127\.0\.0\.1:5199|localhost:5199|\[::1\]:5199/i.test(origin);
-			if (spaOk && apiOk) setExchangeLabStatus(local ? 'local SPA + API up' : 'SPA + API up', 'ok');
-			else if (spaOk) setExchangeLabStatus(local ? 'local desk up' : 'paper desk up', 'ok');
+			// Optional local API health for operators; SPA itself is always public.
+			try {
+				const hr = await fetch(EXCHANGE_API_HEALTH_DEFAULT, { method: 'GET', cache: 'no-store', mode: 'cors' });
+				if (hr.ok) apiOk = true;
+			} catch (_) { /* desk-api is same-origin on public SPA */ }
+			if (spaOk && apiOk) setExchangeLabStatus('public SPA · local API up', 'ok');
+			else if (spaOk) setExchangeLabStatus('public desk up', 'ok');
 			else if (apiOk) setExchangeLabStatus('API up · SPA unreachable', 'warn');
-			else setExchangeLabStatus(local ? 'offline — start vite :5199' : 'offline — public desk unreachable', 'err');
+			else setExchangeLabStatus('offline — public desk unreachable', 'err');
 		}
 
 		function sanitizeExchangeRouteHash(hash) {
@@ -14837,7 +14799,7 @@
 		async function ensureExchangeLabFrame(forceReload) {
 			const frame = $('exchange-spa-frame');
 			if (!frame) return;
-			// Prefer in-memory origin after Local/Public click so we don't race a stale resolve.
+			// Prefer in-memory origin after Public/Reload so we don't race a stale resolve.
 			const origin = (forceReload && exchangeResolvedOrigin)
 				? exchangeResolvedOrigin
 				: await resolveExchangeSpaOrigin();
@@ -15093,13 +15055,6 @@
 		const btnExReload = $('btn-exchange-reload');
 		if (btnExReload) {
 			btnExReload.addEventListener('click', () => {
-				void ensureExchangeLabFrame(true);
-			});
-		}
-		const btnExLocal = $('btn-exchange-local');
-		if (btnExLocal) {
-			btnExLocal.addEventListener('click', () => {
-				setExchangeSpaOrigin(EXCHANGE_SPA_ORIGIN_LOCAL, true);
 				void ensureExchangeLabFrame(true);
 			});
 		}
