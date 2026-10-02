@@ -237,6 +237,37 @@
 		body.dash-tab-exchange #exchange-chrome {
 			padding: 0.05rem 0.1rem;
 		}
+		@media (max-width: 640px) {
+			body.dash-tab-exchange header.shrink-0 .text-xs,
+			body.dash-tab-exchange header.shrink-0 .text-\[10px\],
+			body.dash-tab-exchange #coin-pill-row,
+			body.dash-tab-exchange #desktop-admin-strip,
+			body.dash-tab-exchange #admin-token-row {
+				display: none !important;
+			}
+			body.dash-tab-exchange header.shrink-0 {
+				padding-top: 0.2rem !important;
+				padding-bottom: 0.15rem !important;
+				min-height: 0 !important;
+			}
+			body.dash-tab-exchange #tab-bar {
+				display: none !important;
+			}
+			body.dash-tab-exchange #exchange-chrome {
+				padding: 0.05rem 0;
+				gap: 0.25rem;
+			}
+			body.dash-tab-exchange #exchange-chrome .ex-meta {
+				display: none;
+			}
+			body.dash-tab-exchange #panel-exchange {
+				gap: 0;
+				min-height: calc(100dvh - 3.25rem);
+			}
+			body.dash-tab-exchange #exchange-spa-frame {
+				min-height: calc(100dvh - 3.5rem);
+			}
+		}
 		#exchange-chrome {
 			display: flex;
 			flex-wrap: wrap;
@@ -14712,18 +14743,10 @@
 		async function resolveExchangeSpaOrigin() {
 			try {
 				const o = String(localStorage.getItem('hackme.exchange.origin') || '').replace(/\/$/, '');
+				// Honor explicit Local/Public preference — never clear Public just because :5199 is up.
 				if (o && EXCHANGE_SPA_ORIGIN_ALLOW.includes(o)) {
-					const localish = /127\.0\.0\.1:5199|localhost:5199|\[::1\]:5199/i.test(o);
-					// On loopback hub, skip a stale public preference when local desk is up.
-					if (!isLoopbackHostname(location.hostname) || localish) {
-						exchangeResolvedOrigin = o;
-						return o;
-					}
-					if (!(await probeOriginReachable(EXCHANGE_SPA_ORIGIN_LOCAL))) {
-						exchangeResolvedOrigin = o;
-						return o;
-					}
-					try { localStorage.removeItem('hackme.exchange.origin'); } catch (_) {}
+					exchangeResolvedOrigin = o;
+					return o;
 				}
 			} catch (_) {}
 			if (isLoopbackHostname(location.hostname)) {
@@ -14754,8 +14777,7 @@
 			const origin = exchangeSpaOrigin();
 			const label = $('exchange-origin-label');
 			if (label) label.textContent = origin;
-			const pop = $('btn-exchange-popout');
-			if (pop) pop.href = origin + '/';
+			syncExchangePopoutHref(origin, exchangeStoredHash());
 			setExchangeLabStatus('checking…', '');
 			let spaOk = false;
 			let apiOk = false;
@@ -14779,15 +14801,52 @@
 			else setExchangeLabStatus(local ? 'offline — start vite :5199' : 'offline — public desk unreachable', 'err');
 		}
 
+		function sanitizeExchangeRouteHash(hash) {
+			const raw = String(hash || '').replace(/^#/, '').trim();
+			if (!raw || raw.length > 160) return '';
+			if (!/^(spot\/[A-Z0-9_]+\/[0-9A-Za-z]+|convert(\/[a-z]{2,8}){0,2}|account(\/[a-z]{2,16})?|pool(\/lookup\/[A-Za-z0-9_.:%-]+)?)$/.test(raw)) {
+				return '';
+			}
+			return '#' + raw;
+		}
+
+		function exchangeStoredHash() {
+			try {
+				return sanitizeExchangeRouteHash(localStorage.getItem('hackme.exchange.hash') || '');
+			} catch (_) {
+				return '';
+			}
+		}
+
+		function rememberExchangeHash(hash) {
+			const h = sanitizeExchangeRouteHash(hash);
+			if (!h) return '';
+			try { localStorage.setItem('hackme.exchange.hash', h); } catch (_) {}
+			return h;
+		}
+
+		function syncExchangePopoutHref(origin, hash) {
+			const pop = $('btn-exchange-popout');
+			if (!pop) return;
+			const o = String(origin || '').replace(/\/$/, '');
+			const h = sanitizeExchangeRouteHash(hash) || exchangeStoredHash();
+			// Standalone desk (no embed=hub) — same deep link as public URL.
+			pop.href = o + '/' + (h || '');
+		}
+
 		async function ensureExchangeLabFrame(forceReload) {
 			const frame = $('exchange-spa-frame');
 			if (!frame) return;
-			const origin = await resolveExchangeSpaOrigin();
+			// Prefer in-memory origin after Local/Public click so we don't race a stale resolve.
+			const origin = (forceReload && exchangeResolvedOrigin)
+				? exchangeResolvedOrigin
+				: await resolveExchangeSpaOrigin();
+			exchangeResolvedOrigin = origin;
 			const label = $('exchange-origin-label');
 			if (label) label.textContent = origin;
-			const pop = $('btn-exchange-popout');
-			if (pop) pop.href = origin + '/';
-			const next = origin + '/?embed=hub';
+			const hash = exchangeStoredHash();
+			syncExchangePopoutHref(origin, hash);
+			const next = origin + '/?embed=hub' + hash;
 			if (forceReload || !exchangeFrameLoaded || frame.getAttribute('src') !== next) {
 				frame.src = next;
 				exchangeFrameLoaded = true;
@@ -15064,6 +15123,14 @@
 					if (!allow.includes(d.tab)) return;
 					switchTab(d.tab);
 					setSidebarOpen(false);
+					return;
+				}
+				if (d.action === 'route' && typeof d.hash === 'string') {
+					const h = rememberExchangeHash(d.hash);
+					if (!h) return;
+					syncExchangePopoutHref(ev.origin, h);
+					const label = $('exchange-origin-label');
+					if (label) label.title = 'Pop out keeps ' + h;
 				}
 			} catch (_) {}
 		});
