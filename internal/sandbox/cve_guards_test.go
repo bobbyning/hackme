@@ -66,7 +66,10 @@ func TestScriptPushKnownViolation(t *testing.T) {
 	wasm := filepath.Join("..", "..", "tasks", "artifacts", "security", "rust_script_push_bounds_guard.wasm")
 	raw, err := os.ReadFile(wasm)
 	if err != nil {
-		t.Fatal(err)
+		if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		t.Skip("script push guard wasm not built (run scripts/build_security_task_pack.sh):", err)
 	}
 	ctx := context.Background()
 	violation := uint64(0x4c | (521 << 8))
