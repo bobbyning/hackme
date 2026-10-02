@@ -53,8 +53,11 @@
       "ref": "master",
       "fuzz_harness": "expat_stdin",
       "source_files": [
+        "expat/lib/xcs.c",
         "expat/lib/xmlparse.c",
-        "expat/lib/xmltok.c"
+        "expat/lib/xmltok.c",
+        "expat/lib/xmlrole.c",
+        "expat/lib/random_getrandom.c"
       ]
     },
     "qa_assets": {
