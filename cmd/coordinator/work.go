@@ -1106,6 +1106,13 @@ func (m *workManager) markSubmitOutcome(workerID, ipKey, reason string, now int6
 		ipStrike = true
 	case "replay", "unknown_or_already_closed_range", "lease_expired":
 		// Benign races on fast GPU / proxy timeouts: reject only, do not temp-ban home NAT IPs.
+	case "payout_address_locked":
+		// M14 reject on the fuzz submit lane: the declared worker_id holds the
+		// payout lock (the victim) while the submitter signed with a foreign key.
+		// Strike neither — a forger must not rack strikes against the victim id,
+		// and a legit miner whose client still signs with a rotated-away key hits
+		// this on every retry, so this reason must never land in a strike bucket
+		// (it would temp-ban the miner's own IP).
 	case "batch_size_too_large", "impossible_found_rate":
 		workerStrike = true
 		ipStrike = true

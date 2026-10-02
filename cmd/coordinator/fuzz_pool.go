@@ -747,14 +747,13 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 		if locked != "" {
 			if payoutAddr == "" || !strings.EqualFold(locked, payoutAddr) {
 				wm.markSubmitOutcome(req.WorkerID, ipKey, "payout_address_locked", now)
-				_, _ = pf.ReleaseWorkLease(r.Context(), req.CampaignID, req.ItemID, req.WorkerID)
+				// M14 reject: the signing key does not own this worker_id's claim-time
+				// payout lock — either a forged worker_id (lease_owner is the victim) or
+				// a rotated-away key. Do not release the lease on a foreign-key submit
+				// (previously freed the shard, which let any pool token holder snipe a
+				// victim lease by declaring its worker_id); TTL expiry reclaims it.
 				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"ok":                       false,
-					"reason":                   payoutAddressLockedReason(locked, payoutAddr),
-					"locked_payout_address":    locked,
-					"submitted_payout_address": payoutAddr,
-				})
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": "payout_address_locked"})
 				return
 			}
 		} else if payoutAddr != "" {
@@ -767,14 +766,11 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 			wm.mu.Unlock()
 			if memLocked != "" && !strings.EqualFold(memLocked, payoutAddr) {
 				wm.markSubmitOutcome(req.WorkerID, ipKey, "payout_address_locked", now)
-				_, _ = pf.ReleaseWorkLease(r.Context(), req.CampaignID, req.ItemID, req.WorkerID)
+				// Same M14 reject posture as the durable-lock branch above: strike
+				// nobody, release nothing (the declared id is forgeable), and return
+				// the short reason without echoing payout addresses.
 				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"ok":                       false,
-					"reason":                   payoutAddressLockedReason(memLocked, payoutAddr),
-					"locked_payout_address":    memLocked,
-					"submitted_payout_address": payoutAddr,
-				})
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": "payout_address_locked"})
 				return
 			}
 		}
