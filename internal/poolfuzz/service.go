@@ -90,6 +90,11 @@ type ClaimedWork struct {
 	PowerMutCap   int
 	HavocDeepV28  bool
 	HavocDeepV210 bool
+	// SeedByteCorpus mirrors the campaign seed_byte_corpus (LF-imported or pack byte
+	// seeds) onto the claim: the verification replay derives mutating exec bases from
+	// it (corpus round-robin), so the worker must rebuild its cfg with the same corpus
+	// or the two exec input streams diverge.
+	SeedByteCorpus []any
 }
 
 type SubmitRequest struct {

@@ -65,6 +65,9 @@ type ClaimResp struct {
 	PowerMutCap   int  `json:"power_mut_cap,omitempty"`
 	HavocDeepV28  bool `json:"havoc_deep_v28,omitempty"`
 	HavocDeepV210 bool `json:"havoc_deep_v210,omitempty"`
+	// SeedByteCorpus mirrors the campaign seed_byte_corpus so worker-side exec input
+	// derivation stays identical to the coordinator's verification replay.
+	SeedByteCorpus []any `json:"seed_byte_corpus,omitempty"`
 }
 
 // Config drives a supervised fuzz dig loop.
