@@ -23,7 +23,7 @@ const (
 	workStatusReplayPending    = "replay_pending"
 )
 
-// huntClaimRank ranks worker crash/sanitizer claims for report #25 anti-burial.
+// huntClaimRank ranks worker crash/sanitizer claims for report #25/#26 anti-burial.
 // Higher is stronger; clean/empty is 0.
 func huntClaimRank(checkResult int32, trap string) int {
 	trap = strings.TrimSpace(trap)
@@ -37,8 +37,16 @@ func huntClaimRank(checkResult int32, trap string) int {
 }
 
 // huntClaimWouldWeaken is true when a re-submit replaces a crash/sanitizer claim with a weaker one.
+// Kept for tests/diagnostics; enqueue uses huntClaimChanged (report #26) so upgrades are sticky too.
 func huntClaimWouldWeaken(oldCR int32, oldTrap string, newCR int32, newTrap string) bool {
 	return huntClaimRank(newCR, newTrap) < huntClaimRank(oldCR, oldTrap)
+}
+
+// huntClaimChanged is true when check_result/trap differ (any upgrade or downgrade).
+// Report #26: the #25 weaken-only guard let forged worker_id inject crash over clean, then
+// lock the victim out of repair. Pending claims must be idempotent-only.
+func huntClaimChanged(oldCR int32, oldTrap string, newCR int32, newTrap string) bool {
+	return oldCR != newCR || strings.TrimSpace(oldTrap) != strings.TrimSpace(newTrap)
 }
 
 type huntReplayJob struct {
@@ -225,10 +233,9 @@ func (s *Service) enqueueHuntReplay(ctx context.Context, req SubmitRequest, inpu
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE fuzz_work_items
-		 SET status=?, miner_address=CASE WHEN ?!='' THEN ? ELSE miner_address END,
-		     duration_ms=?, updated_at=?, lease_owner='', lease_until=0
+		 SET status=?, duration_ms=?, updated_at=?, lease_owner='', lease_until=0
 		 WHERE id=? AND campaign_id=? AND status='leased' AND lease_owner=?`,
-		workStatusReplayPending, miner, miner, req.DurationMS, now,
+		workStatusReplayPending, req.DurationMS, now,
 		req.ItemID, req.CampaignID, req.WorkerID)
 	if err != nil {
 		return SubmitOutcome{}, err
@@ -257,16 +264,14 @@ func (s *Service) enqueueHuntReplay(ctx context.Context, req SubmitRequest, inpu
 			if qMiner != "" && miner != "" && qMiner != miner {
 				return SubmitOutcome{}, fmt.Errorf("poolfuzz: hunt replay miner_address mismatch")
 			}
-			// Report #25: forged worker_id passes the ownership guard; refuse claim
-			// weakening (crash/sanitizer → clean) so a confirmed finding cannot be buried.
-			if huntClaimWouldWeaken(qCR, qTrap, req.CheckResult, req.Trap) {
-				return SubmitOutcome{}, fmt.Errorf("poolfuzz: hunt replay refuse claim weakening")
+			// Report #25/#26: pending claim is sticky. Refuse any check_result/trap change
+			// (downgrade burial AND upgrade injection). Processing rows already require equality.
+			if huntClaimChanged(qCR, qTrap, req.CheckResult, req.Trap) {
+				return SubmitOutcome{}, fmt.Errorf("poolfuzz: hunt replay refuse claim change")
 			}
 			qStatus = strings.TrimSpace(strings.ToLower(qStatus))
 			if qStatus == huntReplayStatusProcessing {
-				if qCR != req.CheckResult || strings.TrimSpace(qTrap) != strings.TrimSpace(req.Trap) {
-					return SubmitOutcome{}, fmt.Errorf("poolfuzz: hunt replay busy")
-				}
+				// Idempotent retry only; claim already verified equal above.
 			}
 			qid, err := s.ensureHuntReplayQueueRowTx(ctx, tx, req, inputN, miner, now)
 			if err != nil {
@@ -308,26 +313,12 @@ func (s *Service) ensureHuntReplayQueueRowTx(ctx context.Context, tx *sql.Tx, re
 		     WHEN fuzz_hunt_replay_queue.miner_address != '' THEN fuzz_hunt_replay_queue.miner_address
 		     ELSE excluded.miner_address
 		   END,
-		   worker_check_result=CASE
-		     WHEN fuzz_hunt_replay_queue.worker_id != '' AND fuzz_hunt_replay_queue.worker_id != excluded.worker_id
-		       THEN fuzz_hunt_replay_queue.worker_check_result
-		     ELSE excluded.worker_check_result
-		   END,
-		   worker_trap=CASE
-		     WHEN fuzz_hunt_replay_queue.worker_id != '' AND fuzz_hunt_replay_queue.worker_id != excluded.worker_id
-		       THEN fuzz_hunt_replay_queue.worker_trap
-		     ELSE excluded.worker_trap
-		   END,
-		   segment_exec_done=CASE
-		     WHEN fuzz_hunt_replay_queue.worker_id != '' AND fuzz_hunt_replay_queue.worker_id != excluded.worker_id
-		       THEN fuzz_hunt_replay_queue.segment_exec_done
-		     ELSE excluded.segment_exec_done
-		   END,
-		   duration_ms=CASE
-		     WHEN fuzz_hunt_replay_queue.worker_id != '' AND fuzz_hunt_replay_queue.worker_id != excluded.worker_id
-		       THEN fuzz_hunt_replay_queue.duration_ms
-		     ELSE excluded.duration_ms
-		   END,
+		   -- Report #26: claim fields are sticky after first write (same worker_id
+		   -- upgrade/downgrade must not rewrite via ON CONFLICT either).
+		   worker_check_result=fuzz_hunt_replay_queue.worker_check_result,
+		   worker_trap=fuzz_hunt_replay_queue.worker_trap,
+		   segment_exec_done=fuzz_hunt_replay_queue.segment_exec_done,
+		   duration_ms=fuzz_hunt_replay_queue.duration_ms,
 		   status=CASE
 		     WHEN fuzz_hunt_replay_queue.status IN ('done','failed','processing') THEN fuzz_hunt_replay_queue.status
 		     ELSE 'pending'
@@ -605,11 +596,18 @@ func (s *Service) finalizeHuntSubmit(ctx context.Context, p finalizeHuntSubmitPa
 	sem := fuzzengine.ParseCheckSemantics(p.cfg)
 	hasWasm := false
 	miner := strings.TrimSpace(p.req.MinerAddress)
-	wantRunSettle := s.Settler != nil && escrowEnabled(p.cfg) && miner != ""
+	// Report #26: bind miner for pass OR confirmed finding. Never bind on rejected
+	// checks (fake_crash: pass=false, recordFinding=false).
+	minerBind := ""
+	if p.pass || p.recordFinding {
+		minerBind = miner
+	}
+	wantRunSettle := s.Settler != nil && escrowEnabled(p.cfg) && minerBind != "" && p.pass
 	runSettleStatus := ""
 	if wantRunSettle {
 		runSettleStatus = "pending"
 	}
+	wantAnySettle := s.Settler != nil && escrowEnabled(p.cfg) && minerBind != ""
 	statusWhere := "leased"
 	if p.fromReplayPending {
 		statusWhere = workStatusReplayPending
@@ -660,13 +658,13 @@ func (s *Service) finalizeHuntSubmit(ctx context.Context, p finalizeHuntSubmitPa
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE fuzz_work_items
 		 SET status='done', attempts=attempts+1, result_ok=?, duration_ms=?, last_error=?, lease_owner='', lease_until=0, updated_at=?,
-		     miner_address=CASE WHEN ?!='' THEN ? ELSE miner_address END,
+		     miner_address=?,
 		     settle_run_status=CASE WHEN ?!='' THEN ? ELSE settle_run_status END
 		 WHERE id=? AND campaign_id=?
 		   AND status=?
 		   AND lease_owner=CASE WHEN ?='leased' THEN ? ELSE lease_owner END`,
 		boolToInt(p.pass), p.req.DurationMS, strings.TrimSpace(p.req.Trap), p.now,
-		miner, miner, runSettleStatus, runSettleStatus,
+		minerBind, runSettleStatus, runSettleStatus,
 		p.req.ItemID, p.req.CampaignID, statusWhere, statusWhere, p.req.WorkerID)
 	if err != nil {
 		return err
@@ -696,7 +694,7 @@ func (s *Service) finalizeHuntSubmit(ctx context.Context, p finalizeHuntSubmitPa
 		}
 		return fmt.Errorf("poolfuzz: hunt finalize: work item state changed")
 	}
-	if wantRunSettle {
+	if wantAnySettle {
 		if p.recordFinding && huntBountyEligible(p.cfg, findingSeverity) && s.bountyAllowed(ctx, p.cfg, findingID) {
 			_, _ = s.DB.ExecContext(ctx,
 				`UPDATE fuzz_work_items SET settle_finding_status='pending', settle_finding_severity=? WHERE id=? AND campaign_id=?`,

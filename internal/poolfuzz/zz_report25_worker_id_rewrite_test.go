@@ -97,7 +97,7 @@ func TestReport25ForgedWorkerIDRewritesQueuedVerdict(t *testing.T) {
 	forged := clean
 	forged.WorkerID = "victim-w1"
 	_, err = svc.SubmitWithOutcome(ctx, forged)
-	if err == nil || !strings.Contains(err.Error(), "refuse claim weakening") {
+	if err == nil || !strings.Contains(err.Error(), "refuse claim change") {
 		t.Fatalf("forged weaken must be rejected, got %v", err)
 	}
 	wid, cr, trap, st = qrow()
@@ -133,5 +133,23 @@ func TestHuntClaimWouldWeaken(t *testing.T) {
 	}
 	if huntClaimWouldWeaken(1, "hunt_crash:x", 1, "hunt_crash:x") {
 		t.Fatal("idempotent must not weaken")
+	}
+}
+
+func TestHuntClaimChanged(t *testing.T) {
+	if !huntClaimChanged(0, "", 1, "hunt_crash:x") {
+		t.Fatal("clean→crash must change")
+	}
+	if !huntClaimChanged(1, "hunt_crash:x", 0, "") {
+		t.Fatal("crash→clean must change")
+	}
+	if !huntClaimChanged(1, "hunt_sanitizer:a", 1, "hunt_crash:b") {
+		t.Fatal("sanitizer→crash must change")
+	}
+	if huntClaimChanged(1, "hunt_crash:x", 1, "hunt_crash:x") {
+		t.Fatal("idempotent must not change")
+	}
+	if huntClaimChanged(0, "  ", 0, "") {
+		t.Fatal("trap whitespace-only must normalize equal")
 	}
 }

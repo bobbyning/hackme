@@ -1171,11 +1171,19 @@ func (s *Service) SubmitWithOutcome(ctx context.Context, req SubmitRequest) (Sub
 
 	workerID := strings.TrimSpace(req.WorkerID)
 	miner := strings.TrimSpace(req.MinerAddress)
-	wantRunSettle := s.Settler != nil && escrowEnabled(cfg) && miner != ""
+	// Report #26: bind miner for pass OR confirmed finding (bounty needs address).
+	// Never bind on rejected checks (fake_crash: pass=false, recordFinding=false).
+	minerBind := ""
+	if pass || recordFinding {
+		minerBind = miner
+	}
+	// Run-pay only when the check passed — failed/fake_crash must not enqueue PayRun.
+	wantRunSettle := s.Settler != nil && escrowEnabled(cfg) && minerBind != "" && pass
 	runSettleStatus := ""
 	if wantRunSettle {
 		runSettleStatus = "pending"
 	}
+	wantAnySettle := s.Settler != nil && escrowEnabled(cfg) && minerBind != ""
 	if workerID == "" {
 		return SubmitOutcome{}, fmt.Errorf("poolfuzz: worker_id required")
 	}
@@ -1183,13 +1191,13 @@ func (s *Service) SubmitWithOutcome(ctx context.Context, req SubmitRequest) (Sub
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE fuzz_work_items
 		 SET status='done', attempts=attempts+1, result_ok=?, duration_ms=?, last_error=?, lease_owner='', lease_until=0, updated_at=?,
-		     miner_address=CASE WHEN ?!='' THEN ? ELSE miner_address END,
+		     miner_address=?,
 		     settle_run_status=CASE WHEN ?!='' THEN ? ELSE settle_run_status END
 		 WHERE id=? AND campaign_id=?
 		   AND status='leased'
 		   AND lease_owner=?`,
 		boolToInt(pass), req.DurationMS, strings.TrimSpace(req.Trap), now,
-		miner, miner, runSettleStatus, runSettleStatus,
+		minerBind, runSettleStatus, runSettleStatus,
 		req.ItemID, req.CampaignID, workerID)
 	if err != nil {
 		return SubmitOutcome{}, err
@@ -1271,7 +1279,7 @@ func (s *Service) SubmitWithOutcome(ctx context.Context, req SubmitRequest) (Sub
 			return SubmitOutcome{}, err
 		}
 	}
-	if wantRunSettle {
+	if wantAnySettle {
 		if recordFinding && huntBountyEligible(cfg, findingSeverity) && s.bountyAllowed(ctx, cfg, findingID) {
 			_, _ = s.DB.ExecContext(ctx,
 				`UPDATE fuzz_work_items SET settle_finding_status='pending', settle_finding_severity=? WHERE id=? AND campaign_id=?`,

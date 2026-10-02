@@ -740,22 +740,39 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 			return
 		}
 		// Check payout lock without committing address until Submit succeeds (M14).
-		if payoutAddr != "" {
-			wm.mu.Lock()
-			locked := ""
-			if wm.worker != nil {
-				locked = strings.TrimSpace(wm.worker[req.WorkerID].PayoutAddress)
-			}
-			wm.mu.Unlock()
-			if locked != "" && !strings.EqualFold(locked, payoutAddr) {
+		// Report #26 class fix: if worker_id is already payout-locked (claim-time PoP),
+		// require a matching signed payout address — unsigned/forged-id submits cannot
+		// ride an existing lease or rewrite the hunt claim.
+		locked := wm.lockedPayoutAddress(strings.TrimSpace(req.WorkerID))
+		if locked != "" {
+			if payoutAddr == "" || !strings.EqualFold(locked, payoutAddr) {
 				wm.markSubmitOutcome(req.WorkerID, ipKey, "payout_address_locked", now)
-				// Free the shard so other workers can progress (was holding lease until expiry).
 				_, _ = pf.ReleaseWorkLease(r.Context(), req.CampaignID, req.ItemID, req.WorkerID)
 				w.WriteHeader(http.StatusForbidden)
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"ok":                       false,
 					"reason":                   payoutAddressLockedReason(locked, payoutAddr),
 					"locked_payout_address":    locked,
+					"submitted_payout_address": payoutAddr,
+				})
+				return
+			}
+		} else if payoutAddr != "" {
+			// No durable lock yet — keep in-memory check for session-bound workers.
+			wm.mu.Lock()
+			memLocked := ""
+			if wm.worker != nil {
+				memLocked = strings.TrimSpace(wm.worker[req.WorkerID].PayoutAddress)
+			}
+			wm.mu.Unlock()
+			if memLocked != "" && !strings.EqualFold(memLocked, payoutAddr) {
+				wm.markSubmitOutcome(req.WorkerID, ipKey, "payout_address_locked", now)
+				_, _ = pf.ReleaseWorkLease(r.Context(), req.CampaignID, req.ItemID, req.WorkerID)
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok":                       false,
+					"reason":                   payoutAddressLockedReason(memLocked, payoutAddr),
+					"locked_payout_address":    memLocked,
 					"submitted_payout_address": payoutAddr,
 				})
 				return

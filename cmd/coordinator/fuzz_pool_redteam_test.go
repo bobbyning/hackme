@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,40 @@ import (
 )
 
 func canonFuzzSign(p poolfuzz.SubmitSignPayload) []byte { return poolfuzz.CanonicalSubmitBytes(p) }
+
+// Report #26 class fix: once worker_id is payout-locked, unsigned/mismatched
+// fuzz submits must be refused (same gate as fuzz_pool.go submit handler).
+func TestFuzzSubmitLockedWorkerRejectsUnsigned(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockedAddr := signerAddr(pub)
+	wm := &workManager{
+		hybridSignerEnabled: true,
+		hybridSignerStrict:  false,
+		worker: map[string]workerPayoutStat{
+			"victim-w1": {PayoutAddress: lockedAddr},
+		},
+	}
+	locked := wm.lockedPayoutAddress("victim-w1")
+	if locked == "" {
+		t.Fatal("expected durable lock")
+	}
+	reject := func(payoutAddr string) bool {
+		return payoutAddr == "" || !strings.EqualFold(locked, payoutAddr)
+	}
+	if !reject("") {
+		t.Fatal("unsigned must reject when locked")
+	}
+	pub2, _, _ := ed25519.GenerateKey(nil)
+	if !reject(signerAddr(pub2)) {
+		t.Fatal("wrong address must reject")
+	}
+	if reject(lockedAddr) {
+		t.Fatal("matching locked address must be allowed")
+	}
+}
 
 func TestFuzzSubmitTamperedMinerRejected(t *testing.T) {
 	wm := &workManager{
