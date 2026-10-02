@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,9 @@ func requireSecurityWasm(t *testing.T, name string) string {
 	t.Helper()
 	p := filepath.Join("..", "..", "tasks", "artifacts", "security", name)
 	if _, err := os.Stat(p); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("cannot stat security wasm %s: %v", name, err)
+		}
 		if _, lerr := exec.LookPath("rustc"); lerr != nil {
 			t.Skipf("security wasm %s not built and rustc unavailable (run scripts/build_security_task_pack.sh; toolchain: docs/RUST_CPP_TASKS_QUICKSTART.md): %v", name, err)
 		}

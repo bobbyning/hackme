@@ -18,6 +18,9 @@ func mustOrderWasmHex(t *testing.T) string {
 	p := filepath.Join("..", "..", "tasks", "artifacts", "security", "rust_script_push_bounds_guard.wasm")
 	raw, err := os.ReadFile(p)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
 		t.Skipf("order gate wasm %s not built (run scripts/build_security_task_pack.sh): %v", filepath.Base(p), err)
 	}
 	return hex.EncodeToString(raw)

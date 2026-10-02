@@ -140,6 +140,9 @@ func mustReadWasmHex(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
 		t.Skipf("security wasm %s not built (run scripts/build_security_task_pack.sh): %v", filepath.Base(path), err)
 	}
 	return hex.EncodeToString(b)
