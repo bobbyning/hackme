@@ -58,6 +58,12 @@ func (s *Service) buildHuntClaimedWork(ctx context.Context, campaignID string, i
 	var inputU uint64
 	var corpusSeeds []fuzzengine.PoolCorpusSeed
 	var corpusSHA string
+	var seedCorpus []any
+	if raw, ok := cfg["seed_byte_corpus"]; ok && raw != nil {
+		if list, ok := raw.([]any); ok && len(list) > 0 {
+			seedCorpus = list
+		}
+	}
 	if hunt.HuntCorpusGuided(cfg) {
 		var err error
 		inputU, inputB, corpusSeeds, err = s.lockHuntGuidedWorkItem(ctx, campaignID, itemID, inputN, cfg, now)
@@ -104,6 +110,7 @@ func (s *Service) buildHuntClaimedWork(ctx context.Context, campaignID string, i
 		PowerMutCap:          mutCap,
 		HavocDeepV28:         deepV28,
 		HavocDeepV210:        deepV210,
+		SeedByteCorpus:       seedCorpus,
 	}, nil
 }
 
