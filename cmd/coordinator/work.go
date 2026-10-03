@@ -266,6 +266,8 @@ func newWorkManagerFromEnv() *workManager {
 	if mod > maxM {
 		mod = maxM
 	}
+	// Solvability for PohEval=7n+13: never start (or reload) on a multiple of 7.
+	mod = sanitizePoolTargetMod7n13(mod, minM, maxM)
 	targetURL := strings.TrimRight(strings.TrimSpace(os.Getenv("HACKME_COORDINATOR_TARGET_SOURCE_URL")), "/")
 	targetEvery := int64(3)
 	if v := strings.TrimSpace(os.Getenv("HACKME_COORDINATOR_TARGET_REFRESH_SEC")); v != "" {
@@ -464,13 +466,15 @@ func loadPersistedPoolTargetMod() uint64 {
 	if err != nil || x == 0 {
 		return 0
 	}
-	return x
+	// Mirror chain: bad stored M must not block mining after restart (report #29).
+	return sanitizePoolTargetMod7n13(x, poolTargetModMin, poolTargetModMax)
 }
 
 func persistPoolTargetMod(mod uint64) {
 	if mod == 0 {
 		return
 	}
+	mod = sanitizePoolTargetMod7n13(mod, poolTargetModMin, poolTargetModMax)
 	path := poolTargetModPersistPath()
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	_ = os.WriteFile(path, []byte(strconv.FormatUint(mod, 10)+"\n"), 0o644)
@@ -574,12 +578,37 @@ func (m *workManager) clampTargetMod(u uint64) uint64 {
 		minM, maxM = uint64(poolTargetModMin), uint64(poolTargetModMax)
 	}
 	if u < minM {
-		return minM
+		u = minM
 	}
 	if u > maxM {
-		return maxM
+		u = maxM
 	}
-	return u
+	// Same solvability rule as chain.ClampPoHTargetMod / sanitizePoHTargetMod7n13:
+	// PohEval(n)=7n+13 has no solution when 7|M (report #29).
+	return sanitizePoolTargetMod7n13(u, minM, maxM)
+}
+
+// sanitizePoolTargetMod7n13 nudges M off multiples of 7 while staying in [minM, maxM].
+func sanitizePoolTargetMod7n13(m, minM, maxM uint64) uint64 {
+	if minM > maxM {
+		minM, maxM = maxM, minM
+	}
+	if m < minM {
+		m = minM
+	}
+	if m > maxM {
+		m = maxM
+	}
+	if m%7 != 0 {
+		return m
+	}
+	if m < maxM {
+		return m + 1
+	}
+	if m > minM {
+		return m - 1
+	}
+	return m
 }
 
 func validFoundNonceV1(foundNonce, targetMod uint64) bool {
@@ -798,6 +827,48 @@ func (m *workManager) maybeRetargetPoolMod(now int64) {
 	}
 }
 
+// maybeEasePoolModOnStallLocked eases M when no accepted found has landed for a long stretch.
+// Unlike maybeRetargetPoolMod (found-triggered), this does not require / invent lastFoundHitUnix
+// — covers the report #29 freeze where find-gap easing was unreachable.
+// Caller must hold m.mu.
+func (m *workManager) maybeEasePoolModOnStallLocked(now int64) {
+	if !m.poolRetarget || m.lastFoundHitUnix > 0 {
+		return
+	}
+	anchor := m.targetModUpdatedUnix
+	if anchor == 0 {
+		anchor = m.lastPoolRetargetUnix
+	}
+	if anchor == 0 {
+		m.targetModUpdatedUnix = now
+		m.lastPoolRetargetUnix = now
+		return
+	}
+	if now-anchor < chain.PoHRetargetTargetSec*6 {
+		return
+	}
+	if m.lastPoolRetargetUnix > 0 && now-m.lastPoolRetargetUnix < m.poolRetargetMinSec {
+		return
+	}
+	prev := m.clampTargetMod(m.targetMod)
+	next := m.clampTargetMod(uint64(float64(prev)*0.88 + 0.5))
+	if next == m.targetMod {
+		m.targetModUpdatedUnix = now
+		m.lastPoolRetargetUnix = now
+		return
+	}
+	m.targetMod = next
+	m.targetModUpdatedUnix = now
+	m.lastPoolRetargetUnix = now
+	persistPoolTargetMod(next)
+	if m.rewardAuto && m.baseRewardHMC > 0 {
+		m.rewardPerM = (m.baseRewardHMC * 1_000_000.0) / float64(m.targetMod)
+		if m.rewardPerM < 0 {
+			m.rewardPerM = 0
+		}
+	}
+}
+
 // maybeRetargetPoolLoad nudges M from fleet hashrate + miner count (more miners/hash → higher M).
 func (m *workManager) maybeRetargetPoolLoad(now int64, poolGH float64, miners int) {
 	m.mu.Lock()
@@ -825,6 +896,9 @@ func (m *workManager) maybeRetargetPoolLoadLocked(now int64, poolGH float64, min
 	target := m.clampTargetMod(uint64(loadM + 0.5))
 	prev := m.clampTargetMod(m.targetMod)
 	if target == prev {
+		// Periodic tick even when load-stable: stall easing must not require an accepted found
+		// (report #29 — find-gap path used to be unreachable while the gate was unsatisfiable).
+		m.maybeEasePoolModOnStallLocked(now)
 		return
 	}
 	var next uint64
