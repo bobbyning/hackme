@@ -568,7 +568,6 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": reasonSeen})
 			return
 		}
-		wm.noteWorkerClientIP(workerID, ipKey)
 		work, ok, err := pf.Claim(r.Context(), workerID, now)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -595,6 +594,10 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 			})
 			return
 		}
+		// Bind payout lock only after a fully successful claim (not on no_fuzz_work /
+		// rate-limit / harness reject — those must not squat an unlocked id).
+		wm.bindClaimPayoutFromPub(workerID, pub)
+		wm.noteWorkerClientIP(workerID, ipKey)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		payload := map[string]any{
 			"ok":              true,
@@ -889,7 +892,9 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 			}
 			ipKey := clientIPKey(r)
 			now := time.Now().Unix()
-			if ok, reason := wm.allowClaim(workerID, ipKey, now); !ok {
+			// IP/ban gate only — never charge the declared worker claim bucket on
+			// release (unlocked ids pass check-only identity with any pubkey).
+			if ok, reason := wm.allowClaimPeer(workerID, ipKey, now); !ok {
 				wm.recordDrop("release_" + reason)
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusTooManyRequests)

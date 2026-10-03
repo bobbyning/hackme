@@ -928,6 +928,15 @@ func (m *workManager) touchWorkerSeenLimited(workerID string) (ok bool, reason s
 	return true, ""
 }
 
+// Rate-gate invariant (reports #27/#28 + harden pass):
+//
+//  1. Identity BEFORE charging a forgeable declared worker_id.
+//     Claim/release already check pubkey→lock first; submit charges the
+//     worker slot only after signature / payout-lock (chargeSubmitWorker).
+//  2. Peer/IP slots MAY run pre-verification — the key is the real peer address.
+//  3. Failed/no-op paths must not create durable bindings (release → check-only).
+//  4. submitPerMin/claimPerMin <= 0 disables the corresponding worker/IP charge
+//     (unit harnesses); production always sets positive ceilings.
 func (m *workManager) allowRateSlot(state workerAbuseState, now int64, limit int, claim bool) (workerAbuseState, bool) {
 	if state.BannedUntil > now {
 		return state, false
@@ -1005,12 +1014,47 @@ func (m *workManager) allowClaim(workerID, ipKey string, now int64) (bool, strin
 	if s := m.abuse[workerID]; s.BannedUntil > now {
 		return false, "worker_temporarily_banned"
 	}
+	if m.claimPerMin <= 0 {
+		return true, ""
+	}
 	perMin := m.workerRateLimitPerMin(workerID, m.claimPerMin)
 	s, ok := m.allowRateSlot(m.abuse[workerID], now, perMin, true)
 	m.abuse[workerID] = s
 	if !ok {
 		return false, "claim_rate_limited"
 	}
+	if ipKey == "" {
+		return true, ""
+	}
+	if ip := m.ipAbuse[ipKey]; ip.BannedUntil > now {
+		return false, "worker_temporarily_banned"
+	}
+	ip, ok := m.allowRateSlot(m.ipAbuse[ipKey], now, perMin*4, true)
+	m.ipAbuse[ipKey] = ip
+	if !ok {
+		return false, "claim_rate_limited"
+	}
+	return true, ""
+}
+
+// allowClaimPeer gates bans + IP claim bucket without charging the declared
+// worker_id. Used on release (and similar) where the id is forgeable until a
+// lock exists — charging the nominal worker would let a shared-token peer freeze
+// an unlocked victim's claim lane (same class as report #28).
+func (m *workManager) allowClaimPeer(workerID, ipKey string, now int64) (bool, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneAbuseStateLocked(now)
+	if m.isHardPermabannedLocked(workerID, ipKey) {
+		return false, "worker_permabanned"
+	}
+	if s := m.abuse[workerID]; s.BannedUntil > now {
+		return false, "worker_temporarily_banned"
+	}
+	if m.claimPerMin <= 0 {
+		return true, ""
+	}
+	perMin := m.workerRateLimitPerMin(workerID, m.claimPerMin)
 	if ipKey == "" {
 		return true, ""
 	}
@@ -1047,6 +1091,9 @@ func (m *workManager) allowSubmitPeer(workerID, ipKey string, now int64) (bool, 
 	if s := m.abuse[workerID]; s.BannedUntil > now {
 		return false, "worker_temporarily_banned"
 	}
+	if m.submitPerMin <= 0 {
+		return true, ""
+	}
 	perMin := m.workerRateLimitPerMin(workerID, m.submitPerMin)
 	if ipKey == "" {
 		return true, ""
@@ -1071,6 +1118,9 @@ func (m *workManager) chargeSubmitWorker(workerID string, now int64) (bool, stri
 }
 
 func (m *workManager) chargeSubmitWorkerLocked(workerID string, now int64) (bool, string) {
+	if m.submitPerMin <= 0 {
+		return true, ""
+	}
 	m.pruneAbuseStateLocked(now)
 	if m.abuse == nil {
 		m.abuse = make(map[string]workerAbuseState)
@@ -1328,18 +1378,32 @@ func payoutAddressLockedReason(locked, submitted string) string {
 	return fmt.Sprintf("payout_address_locked:locked=%s:submitted=%s", locked, submitted)
 }
 
-// checkClaimMinerIdentity binds claim pubkey/address to a locked worker payout.
+// checkClaimMinerIdentity validates claim pubkey/address against a locked worker payout.
 // When claimRequirePubKey is set (default under hybrid), miner_pubkey is mandatory.
 // When require is off, omitted identity is a legacy claim and does not touch the lock.
-// A sticky payout lock is ONLY written from a verified pubkey — never from address hint alone.
+// Durable locks are NOT written here — callers bind only after a successful claim
+// via bindClaimPayoutFromPub (failed/no_fuzz_work must not squat an id).
 func (m *workManager) checkClaimMinerIdentity(workerID, pubHex, addrHint string) (ok bool, reason string) {
-	return m.checkMinerIdentity(workerID, pubHex, addrHint, true)
+	return m.checkMinerIdentity(workerID, pubHex, addrHint, false)
 }
 
 // checkReleaseMinerIdentity validates worker_id→payout binding for release without
 // creating a lock (report #27: a failed/no-op release must not register identity).
 func (m *workManager) checkReleaseMinerIdentity(workerID, pubHex, addrHint string) (ok bool, reason string) {
 	return m.checkMinerIdentity(workerID, pubHex, addrHint, false)
+}
+
+// bindClaimPayoutFromPub writes the sticky payout lock after a successful claim/lease.
+func (m *workManager) bindClaimPayoutFromPub(workerID, pubHex string) {
+	pubHex = strings.TrimSpace(pubHex)
+	if pubHex == "" {
+		return
+	}
+	derived, ok := deriveAddressFromPubHex(pubHex)
+	if !ok {
+		return
+	}
+	m.notePayoutLock(workerID, derived)
 }
 
 // checkMinerIdentity validates pubkey/address against an existing payout lock.
@@ -1385,6 +1449,8 @@ func (m *workManager) checkMinerIdentity(workerID, pubHex, addrHint string, crea
 }
 
 // notePayoutLock binds worker_id to the first claim identity and persists it.
+// Refuses to create a new worker row when maxWorkers is already saturated
+// (unbounded lock growth via random ids).
 func (m *workManager) notePayoutLock(workerID, addr string) {
 	if m == nil {
 		return
@@ -1398,7 +1464,11 @@ func (m *workManager) notePayoutLock(workerID, addr string) {
 	if m.worker == nil {
 		m.worker = map[string]workerPayoutStat{}
 	}
-	st := m.worker[workerID]
+	st, exists := m.worker[workerID]
+	if !exists && m.maxWorkers > 0 && len(m.worker) >= m.maxWorkers {
+		m.mu.Unlock()
+		return
+	}
 	cur := strings.TrimSpace(st.PayoutAddress)
 	if cur == "" {
 		st.PayoutAddress = addr
@@ -1595,10 +1665,9 @@ func (m *workManager) submit(req submitWorkRequest) (accepted bool, reason strin
 	}
 	sigOK, sigReason, signerAddr := m.validateHybridSignature(req)
 	if !sigOK {
-		// Keep lease on replay so the worker can bump submit_nonce and retry the same range.
-		if sigReason != "replay" && sigReason != "duplicate_signed_payload" {
-			delete(m.active, k)
-		}
+		// Keep lease on signature failures — a shared-token forger must not burn
+		// a victim lease by declaring its worker_id with a bad/unsigned sig.
+		// (Replay/duplicate already kept the lease; extend to all sig rejects.)
 		m.signedRejects++
 		m.rejectedSubmits++
 		return false, sigReason, 0, "", false
@@ -2589,6 +2658,7 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 			})
 			return
 		}
+		wm.bindClaimPayoutFromPub(workerID, req.MinerPubKey)
 		wm.noteWorkerClientIP(workerID, ipKey)
 		mode := wm.schedulerModeNow()
 		taskClass := "baseline"
@@ -2685,18 +2755,22 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 		if reason != "" {
 			wm.recordDrop(reason)
 		}
-		_ = reg.Upsert(r.RemoteAddr, lanpool.PushWorkBody{
-			WorkerID:      workerID,
-			IP:            ipKey,
-			HashrateGHS:   req.HashrateGHS,
-			ShareAccepted: &accepted,
-		})
-		wm.noteWorkerClientIP(workerID, ipKey)
-		if db != nil {
-			if peerFlusher != nil {
-				peerFlusher.mark(workerID)
-			} else if err := persistPeer(r.Context(), db, workerID, reg); err != nil {
-				log.Printf("peer persist %s: %v", logsafe.ID(workerID), err)
+		// Peer/IP board updates only on accepted work — forgeable declared ids on
+		// rejected submits must not overwrite LastClientIP / peer registry.
+		if reason == "" {
+			_ = reg.Upsert(r.RemoteAddr, lanpool.PushWorkBody{
+				WorkerID:      workerID,
+				IP:            ipKey,
+				HashrateGHS:   req.HashrateGHS,
+				ShareAccepted: &accepted,
+			})
+			wm.noteWorkerClientIP(workerID, ipKey)
+			if db != nil {
+				if peerFlusher != nil {
+					peerFlusher.mark(workerID)
+				} else if err := persistPeer(r.Context(), db, workerID, reg); err != nil {
+					log.Printf("peer persist %s: %v", logsafe.ID(workerID), err)
+				}
 			}
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

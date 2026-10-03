@@ -30,6 +30,9 @@ Reports: `reports/tests/security_full_20260828T190633Z/` · `reports/gates/redte
 | Worker payout lock persists across restart and idle prune (report #18) | `worker_payout_lock` in coordinator SQLite |
 | Release lane must not create payout locks; admin unbind recovers (report #27) | `checkReleaseMinerIdentity` + `/api/work/admin/unbind-payout-lock` |
 | Submit worker rate slot charged only after signature / payout-lock (report #28) | `allowSubmitPeer` + `chargeSubmitWorker` |
+| Release must not charge claim buckets on forgeable ids | `allowClaimPeer` on `/api/fuzz/work/release` |
+| Claim binds payout lock only after successful lease; failed claim does not squat | `bindClaimPayoutFromPub` after Claim/claim ok |
+| PoH submit keeps lease on signature failures; peer IP only on accept | `submit()` + handler gate |
 | ASAN bounty requires a non-zero exit and a canonical AddressSanitizer banner (report #14) | `internal/fuzzupstream/fuzz.go` |
 | CI gate crash counts use the full finding history, not the display window (report #11) | `fullCrashClassSeverityCounts` |
 | Campaign progress requires a pool token and does not close escrow; finalize waits for settle pull (report #12) | `fuzz_pool.go`, `fuzz_pool_progress.go` |
