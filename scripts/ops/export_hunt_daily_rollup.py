@@ -22,19 +22,23 @@ def load_slots(day_dir: Path) -> list[dict]:
         fam = hunt.get("finding_families") or {}
         name = slot.name  # HH00-target
         hour, _, target = name.partition("-")
+        verdict = hunt.get("verdict") or meta.get("verdict")
+        err = hunt.get("error") or meta.get("error")
+        if not verdict and err:
+            verdict = "SKIP" if err == "missing_driver" else "ERROR"
         rows.append(
             {
                 "slot": name,
                 "hour_utc": hour[:2] if hour else meta.get("hour"),
                 "target": hunt.get("target") or target or meta.get("target"),
-                "verdict": hunt.get("verdict") or meta.get("verdict"),
+                "verdict": verdict,
                 "iterations": hunt.get("iterations") or meta.get("iterations") or 0,
                 "crashes": hunt.get("crashes") or meta.get("crashes") or 0,
                 "exec_per_sec": hunt.get("exec_per_sec") or meta.get("exec_per_sec") or 0,
                 "unique_signatures": hunt.get("unique_signatures") or meta.get("unique_signatures") or 0,
                 "family_count": fam.get("family_count") or meta.get("family_count") or 0,
-                "ok": meta.get("ok", hunt_p.is_file()),
-                "error": hunt.get("error"),
+                "ok": meta.get("ok", hunt_p.is_file() and not err),
+                "error": err,
                 "sanitizer_signatures": hunt.get("sanitizer_signatures") or {},
             }
         )
