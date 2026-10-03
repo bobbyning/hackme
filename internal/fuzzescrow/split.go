@@ -40,7 +40,7 @@ func ComputeSplitUnits(totalUnits uint64, budgetRuns int) (SplitUnits, error) {
 	if budgetRuns > MaxCampaignRuns {
 		return SplitUnits{}, errors.New("fuzz escrow: budget_runs too large")
 	}
-	runsUnits := uint64(float64(totalUnits) * RunsPoolShare)
+	runsUnits := totalUnits / 5 // 20% runs pool (integer)
 	bountyUnits := totalUnits - runsUnits
 	perRun := runsUnits / uint64(budgetRuns)
 	if perRun == 0 {

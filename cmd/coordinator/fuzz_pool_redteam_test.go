@@ -164,8 +164,7 @@ func TestHTTPFuzzSubmitUnauth(t *testing.T) {
 	}
 }
 
-func TestHTTPFuzzClaimRateLimited(t *testing.T) {
-	pf := &poolfuzz.Service{DB: nil}
+func TestChargeClaimWorkerRateLimits(t *testing.T) {
 	wm := &workManager{
 		claimPerMin:     1,
 		abuse:           make(map[string]workerAbuseState),
@@ -173,25 +172,49 @@ func TestHTTPFuzzClaimRateLimited(t *testing.T) {
 		worker:          make(map[string]workerPayoutStat),
 		dropReasonCount: make(map[string]uint64),
 	}
+	now := time.Now().Unix()
+	if ok, _ := wm.chargeClaimWorker("w-rate", now); !ok {
+		t.Fatal("first chargeClaimWorker should pass")
+	}
+	if ok, reason := wm.chargeClaimWorker("w-rate", now); ok || reason != "claim_rate_limited" {
+		t.Fatalf("want claim_rate_limited, got ok=%v reason=%q", ok, reason)
+	}
+}
+
+func TestHTTPFuzzClaimPeerGateDoesNotPreChargeWorker(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "claim-peer.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	pf := &poolfuzz.Service{DB: db}
+	wm := &workManager{
+		claimPerMin:     1,
+		abuse:           make(map[string]workerAbuseState),
+		ipAbuse:         make(map[string]workerAbuseState),
+		worker:          make(map[string]workerPayoutStat),
+		dropReasonCount: make(map[string]uint64),
+		maxWorkers:      100,
+	}
 	mux := http.NewServeMux()
 	addFuzzPoolRoutes(mux, "admin-tok", "worker-tok", false, wm, pf)
-
-	now := time.Now().Unix()
-	if ok, _ := wm.allowClaim("w-rate", "", now); !ok {
-		t.Fatal("first allowClaim should pass")
+	// Empty queue → no_fuzz_work; forgeable id must not consume claim bucket.
+	for i := 0; i < 5; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/fuzz/work/claim", bytes.NewReader([]byte(`{"worker_id":"w-rate"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Hackme-Admin-Token", "worker-tok")
+		mux.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK {
+			t.Fatalf("expected empty queue, got 200")
+		}
 	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/fuzz/work/claim", bytes.NewReader([]byte(`{"worker_id":"w-rate"}`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Hackme-Admin-Token", "worker-tok")
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("want 429 claim_rate_limited, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var out map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if out["reason"] != "claim_rate_limited" {
-		t.Fatalf("body=%s", rec.Body.String())
+	wm.mu.Lock()
+	st := wm.abuse["w-rate"]
+	wm.mu.Unlock()
+	if st.ClaimCount != 0 {
+		t.Fatalf("failed claims must not charge worker claim slot, ClaimCount=%d", st.ClaimCount)
 	}
 }
 

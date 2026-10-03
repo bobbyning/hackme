@@ -1117,6 +1117,30 @@ func (m *workManager) chargeSubmitWorker(workerID string, now int64) (bool, stri
 	return m.chargeSubmitWorkerLocked(workerID, now)
 }
 
+// chargeClaimWorker consumes the declared worker_id claim slot after a successful lease.
+func (m *workManager) chargeClaimWorker(workerID string, now int64) (bool, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.chargeClaimWorkerLocked(workerID, now)
+}
+
+func (m *workManager) chargeClaimWorkerLocked(workerID string, now int64) (bool, string) {
+	if m.claimPerMin <= 0 {
+		return true, ""
+	}
+	m.pruneAbuseStateLocked(now)
+	if m.abuse == nil {
+		m.abuse = make(map[string]workerAbuseState)
+	}
+	perMin := m.workerRateLimitPerMin(workerID, m.claimPerMin)
+	s, ok := m.allowRateSlot(m.abuse[workerID], now, perMin, true)
+	m.abuse[workerID] = s
+	if !ok {
+		return false, "claim_rate_limited"
+	}
+	return true, ""
+}
+
 func (m *workManager) chargeSubmitWorkerLocked(workerID string, now int64) (bool, string) {
 	if m.submitPerMin <= 0 {
 		return true, ""
@@ -1679,16 +1703,17 @@ func (m *workManager) submit(req submitWorkRequest) (accepted bool, reason strin
 			return false, payoutAddressLockedReason(locked, signerAddr), 0, "", false
 		}
 	}
-	// Report #28: charge declared worker_id only after identity is proven.
-	if okRate, reasonRate := m.chargeSubmitWorkerLocked(req.WorkerID, now); !okRate {
-		m.rejectedSubmits++
-		return false, reasonRate, 0, signerAddr, true
-	}
 	if rec.ExpiresAt < now {
 		delete(m.active, k)
 		m.staleSubmits++
 		m.noteWorkerStale(req.WorkerID, now)
-		return false, "lease_expired", 0, "", false
+		return false, "lease_expired", 0, signerAddr, true
+	}
+	// Report #28 + harden: charge worker slot only after identity AND a live lease
+	// (expired/no-op must not burn the victim's submit budget).
+	if okRate, reasonRate := m.chargeSubmitWorkerLocked(req.WorkerID, now); !okRate {
+		m.rejectedSubmits++
+		return false, reasonRate, 0, signerAddr, true
 	}
 	if m.maxClaimBatch > 0 && req.BatchSize > m.maxClaimBatch {
 		delete(m.active, k)
@@ -2619,7 +2644,8 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 			return
 		}
 		ipKey := clientIPKey(r)
-		if ok, reason := wm.allowClaim(workerID, ipKey, time.Now().Unix()); !ok {
+		now := time.Now().Unix()
+		if ok, reason := wm.allowClaimPeer(workerID, ipKey, now); !ok {
 			wm.recordDrop(reason)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -2659,6 +2685,20 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 			return
 		}
 		wm.bindClaimPayoutFromPub(workerID, req.MinerPubKey)
+		if okCharge, reasonCharge := wm.chargeClaimWorker(workerID, now); !okCharge {
+			wm.mu.Lock()
+			delete(wm.active, workKey{base: base, batch: size})
+			wm.mu.Unlock()
+			wm.recordDrop(reasonCharge)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":        false,
+				"worker_id": workerID,
+				"reason":    reasonCharge,
+			})
+			return
+		}
 		wm.noteWorkerClientIP(workerID, ipKey)
 		mode := wm.schedulerModeNow()
 		taskClass := "baseline"

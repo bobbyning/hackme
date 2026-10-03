@@ -49,7 +49,7 @@ func TestHuntBountyPayoutUnitsHighPays60Percent(t *testing.T) {
 		t.Fatal("high should be payable")
 	}
 	slice := miner + fee
-	want := uint64(float64(remaining) * 0.6)
+	want := remaining * 6 / 10
 	if slice < want-2 || slice > want+2 {
 		t.Fatalf("high slice=%d want ~%d", slice, want)
 	}

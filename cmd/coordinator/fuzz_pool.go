@@ -549,7 +549,8 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 		}
 		ipKey := clientIPKey(r)
 		now := time.Now().Unix()
-		if ok, reason := wm.allowClaim(workerID, ipKey, now); !ok {
+		// Peer/IP gate only until claim succeeds — then chargeClaimWorker.
+		if ok, reason := wm.allowClaimPeer(workerID, ipKey, now); !ok {
 			wm.recordDrop(reason)
 			w.WriteHeader(http.StatusTooManyRequests)
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": reason})
@@ -597,6 +598,14 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 		// Bind payout lock only after a fully successful claim (not on no_fuzz_work /
 		// rate-limit / harness reject — those must not squat an unlocked id).
 		wm.bindClaimPayoutFromPub(workerID, pub)
+		if okCharge, reasonCharge := wm.chargeClaimWorker(workerID, now); !okCharge {
+			// Lease already held — release so a rate-limited success does not stick.
+			_, _ = pf.ReleaseWorkLease(r.Context(), work.CampaignID, work.ItemID, workerID)
+			wm.recordDrop(reasonCharge)
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": reasonCharge})
+			return
+		}
 		wm.noteWorkerClientIP(workerID, ipKey)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		payload := map[string]any{
@@ -804,8 +813,13 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 			SegmentExecDone: req.SegmentExecDone,
 		})
 		if err != nil {
-			// Free lease on reject (segment mismatch / replay fail) so shards do not burn TTL.
-			_, _ = pf.ReleaseWorkLease(r.Context(), req.CampaignID, req.ItemID, req.WorkerID)
+			// Free lease only when identity is proven via payout lock match.
+			// Unlocked forgeable ids must not snipe a victim shard on submit error
+			// (TTL reclaim handles abandon); locked+matched means the real miner.
+			locked := wm.lockedPayoutAddress(strings.TrimSpace(req.WorkerID))
+			if locked != "" && payoutAddr != "" && strings.EqualFold(locked, payoutAddr) {
+				_, _ = pf.ReleaseWorkLease(r.Context(), req.CampaignID, req.ItemID, req.WorkerID)
+			}
 			wm.markSubmitOutcome(req.WorkerID, ipKey, "fuzz_submit_failed", now)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

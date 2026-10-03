@@ -110,7 +110,18 @@ func HuntBountyPayoutUnits(remaining uint64, severity string) (minerUnits, feeUn
 	if share <= 0 || remaining == 0 {
 		return 0, 0, false
 	}
-	slice := uint64(float64(remaining) * share)
+	// Integer share (avoid float truncation drift on unit ledgers).
+	var slice uint64
+	switch {
+	case share >= 1:
+		slice = remaining
+	case share >= 0.6:
+		slice = remaining * 6 / 10
+	case share >= 0.3:
+		slice = remaining * 3 / 10
+	default:
+		slice = uint64(float64(remaining) * share) // defensive fallback for odd shares
+	}
 	if slice < MinPerRunUnits {
 		return 0, 0, false
 	}
