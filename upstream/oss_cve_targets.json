@@ -1778,7 +1778,7 @@
     }
   ],
   "rotation": {
-    "note": "nightly picks 2 targets by day-of-year mod queue length",
+    "note": "Hunt daily/hourly rotate: only IDs with tasks/sources/fuzz/oss/<driver>.{c,rs}. Catalog may list more; undrivable IDs live in deferred_until_driver until harnesses land. csonh stays on disclosure hold.",
     "queue": [
       "jsmn",
       "inih",
@@ -1800,17 +1800,18 @@
       "tinycbor",
       "microtar",
       "lz4",
+      "sheredom",
+      "libconfini",
+      "tomlc17",
+      "cyaml"
+    ],
+    "deferred_until_driver": [
       "hiredis",
       "wren",
       "minimp3",
       "stb_vorbis",
-      "sheredom",
-      "libconfini",
-      "tomlc17",
-      "cyaml",
       "microjson",
       "diffstorm",
-      "csonh",
       "jes",
       "okjson",
       "csfm",
