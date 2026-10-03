@@ -718,7 +718,9 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 		}
 		ipKey := clientIPKey(r)
 		now := time.Now().Unix()
-		if okSub, reasonSub := wm.allowSubmit(req.WorkerID, ipKey, now); !okSub {
+		// Report #28: charge IP/bans only here. Declared worker_id slot is charged
+		// after signature + payout-lock (see below) so forged ids cannot freeze a miner.
+		if okSub, reasonSub := wm.allowSubmitPeer(req.WorkerID, ipKey, now); !okSub {
 			wm.recordDrop(reasonSub)
 			w.WriteHeader(http.StatusTooManyRequests)
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": reasonSub})
@@ -773,6 +775,12 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": "payout_address_locked"})
 				return
 			}
+		}
+		if okSub, reasonSub := wm.chargeSubmitWorker(req.WorkerID, now); !okSub {
+			wm.recordDrop(reasonSub)
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": reasonSub})
+			return
 		}
 		var inputBytes []byte
 		if h := strings.TrimSpace(req.InputBytesHex); h != "" {

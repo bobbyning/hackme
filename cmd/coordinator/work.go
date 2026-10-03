@@ -1026,6 +1026,18 @@ func (m *workManager) allowClaim(workerID, ipKey string, now int64) (bool, strin
 }
 
 func (m *workManager) allowSubmit(workerID, ipKey string, now int64) (bool, string) {
+	// Legacy combined gate (tests / callers that still want both). Production submit
+	// handlers use allowSubmitPeer + chargeSubmitWorker so a forgeable declared
+	// worker_id is not charged before signature / payout-lock (report #28).
+	if ok, reason := m.allowSubmitPeer(workerID, ipKey, now); !ok {
+		return false, reason
+	}
+	return m.chargeSubmitWorker(workerID, now)
+}
+
+// allowSubmitPeer gates bans + the IP submit bucket. The peer address is not
+// forgeable, so this may run before signature verification (CPU bound).
+func (m *workManager) allowSubmitPeer(workerID, ipKey string, now int64) (bool, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pruneAbuseStateLocked(now)
@@ -1036,11 +1048,6 @@ func (m *workManager) allowSubmit(workerID, ipKey string, now int64) (bool, stri
 		return false, "worker_temporarily_banned"
 	}
 	perMin := m.workerRateLimitPerMin(workerID, m.submitPerMin)
-	s, ok := m.allowRateSlot(m.abuse[workerID], now, perMin, false)
-	m.abuse[workerID] = s
-	if !ok {
-		return false, "submit_rate_limited"
-	}
 	if ipKey == "" {
 		return true, ""
 	}
@@ -1049,6 +1056,28 @@ func (m *workManager) allowSubmit(workerID, ipKey string, now int64) (bool, stri
 	}
 	ip, ok := m.allowRateSlot(m.ipAbuse[ipKey], now, perMin*4, false)
 	m.ipAbuse[ipKey] = ip
+	if !ok {
+		return false, "submit_rate_limited"
+	}
+	return true, ""
+}
+
+// chargeSubmitWorker consumes the declared worker_id submit slot. Call only after
+// signature / payout-lock identity is proven (report #28).
+func (m *workManager) chargeSubmitWorker(workerID string, now int64) (bool, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.chargeSubmitWorkerLocked(workerID, now)
+}
+
+func (m *workManager) chargeSubmitWorkerLocked(workerID string, now int64) (bool, string) {
+	m.pruneAbuseStateLocked(now)
+	if m.abuse == nil {
+		m.abuse = make(map[string]workerAbuseState)
+	}
+	perMin := m.workerRateLimitPerMin(workerID, m.submitPerMin)
+	s, ok := m.allowRateSlot(m.abuse[workerID], now, perMin, false)
+	m.abuse[workerID] = s
 	if !ok {
 		return false, "submit_rate_limited"
 	}
@@ -1580,6 +1609,11 @@ func (m *workManager) submit(req submitWorkRequest) (accepted bool, reason strin
 			m.rejectedSubmits++
 			return false, payoutAddressLockedReason(locked, signerAddr), 0, "", false
 		}
+	}
+	// Report #28: charge declared worker_id only after identity is proven.
+	if okRate, reasonRate := m.chargeSubmitWorkerLocked(req.WorkerID, now); !okRate {
+		m.rejectedSubmits++
+		return false, reasonRate, 0, signerAddr, true
 	}
 	if rec.ExpiresAt < now {
 		delete(m.active, k)
@@ -2626,7 +2660,9 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 		}
 		now := time.Now().Unix()
 		ipKey := clientIPKey(r)
-		if ok, reason := wm.allowSubmit(workerID, ipKey, now); !ok {
+		// Report #28: peer/IP gate only. Worker slot is charged inside submit()
+		// after signature + payout-lock identity is proven.
+		if ok, reason := wm.allowSubmitPeer(workerID, ipKey, now); !ok {
 			wm.recordDrop(reason)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusTooManyRequests)
