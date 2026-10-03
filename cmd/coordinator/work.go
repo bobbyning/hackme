@@ -1304,6 +1304,18 @@ func payoutAddressLockedReason(locked, submitted string) string {
 // When require is off, omitted identity is a legacy claim and does not touch the lock.
 // A sticky payout lock is ONLY written from a verified pubkey — never from address hint alone.
 func (m *workManager) checkClaimMinerIdentity(workerID, pubHex, addrHint string) (ok bool, reason string) {
+	return m.checkMinerIdentity(workerID, pubHex, addrHint, true)
+}
+
+// checkReleaseMinerIdentity validates worker_id→payout binding for release without
+// creating a lock (report #27: a failed/no-op release must not register identity).
+func (m *workManager) checkReleaseMinerIdentity(workerID, pubHex, addrHint string) (ok bool, reason string) {
+	return m.checkMinerIdentity(workerID, pubHex, addrHint, false)
+}
+
+// checkMinerIdentity validates pubkey/address against an existing payout lock.
+// When createLock is true and no lock exists, the derived address is bound (claim lane).
+func (m *workManager) checkMinerIdentity(workerID, pubHex, addrHint string, createLock bool) (ok bool, reason string) {
 	if m == nil {
 		return true, ""
 	}
@@ -1337,7 +1349,7 @@ func (m *workManager) checkClaimMinerIdentity(workerID, pubHex, addrHint string)
 	if locked != "" && !strings.EqualFold(locked, derived) {
 		return false, payoutAddressLockedReason(locked, derived)
 	}
-	if locked == "" {
+	if locked == "" && createLock {
 		m.notePayoutLock(workerID, derived)
 	}
 	return true, ""
@@ -2783,6 +2795,40 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 		out := wm.revokeWorker(req.WorkerID, req.IPKey, true)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(out)
+	})
+
+	// Admin recovery for sticky worker_id→payout locks (report #27).
+	mux.HandleFunc("/api/work/admin/unbind-payout-lock", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !coordinatorPOSTAuthed(r, adminToken, allowInsecure) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="hackme-coordinator"`)
+			http.Error(w, "admin authentication required", http.StatusUnauthorized)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxCoordinatorJSONBodyBytes)
+		var req struct {
+			WorkerID string `json:"worker_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		workerID := strings.TrimSpace(req.WorkerID)
+		if workerID == "" || !validCoordinatorWorkerID(workerID) {
+			http.Error(w, "invalid worker_id", http.StatusBadRequest)
+			return
+		}
+		cleared, prev := wm.clearPayoutLock(workerID)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":               true,
+			"cleared":          cleared,
+			"worker_id":        workerID,
+			"previous_address": prev,
+		})
 	})
 
 	mux.HandleFunc("/api/work/admin/memstats", func(w http.ResponseWriter, r *http.Request) {

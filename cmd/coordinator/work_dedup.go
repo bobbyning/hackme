@@ -221,6 +221,42 @@ func (m *workManager) persistPayoutLock(workerID, addr string) {
 		workerID, addr)
 }
 
+// clearPayoutLock removes the durable + in-memory payout binding for worker_id
+// (admin unbind / report #27 recovery). Returns the address that was cleared.
+func (m *workManager) clearPayoutLock(workerID string) (cleared bool, prevAddr string) {
+	if m == nil {
+		return false, ""
+	}
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return false, ""
+	}
+	prevAddr = m.lockedPayoutAddress(workerID)
+	m.mu.Lock()
+	if m.worker != nil {
+		st := m.worker[workerID]
+		if strings.TrimSpace(st.PayoutAddress) != "" {
+			st.PayoutAddress = ""
+			m.worker[workerID] = st
+			cleared = true
+		}
+	}
+	db := m.dedupDB
+	m.mu.Unlock()
+	if db != nil {
+		res, err := db.Exec(`DELETE FROM worker_payout_lock WHERE worker_id=?`, workerID)
+		if err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				cleared = true
+			}
+		}
+	}
+	if prevAddr == "" && !cleared {
+		return false, ""
+	}
+	return cleared || prevAddr != "", prevAddr
+}
+
 func (m *workManager) persistResultHash(key string) {
 	if m == nil || m.dedupDB == nil || key == "" {
 		return

@@ -864,15 +864,16 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 			http.Error(w, "campaign_id and item_id required", http.StatusBadRequest)
 			return
 		}
-		// Admin may release any lease; shared worker token must bind worker_id→payout lock
-		// (same as claim) so one fleet peer cannot snipe another's lease by forging worker_id.
+		// Admin may release any lease; shared worker token must CHECK worker_id→payout
+		// lock (anti-snipe) but must NOT create one — a failed/no-op release is not a
+		// registration act (report #27 payout-lock poisoning).
 		isAdmin := adminToken != "" && coordAdminOK(r, adminToken)
 		if !isAdmin {
 			pub := strings.TrimSpace(req.MinerPubKey)
 			if pub == "" {
 				pub = strings.TrimSpace(req.MinerPubKeyEd)
 			}
-			if okID, reasonID := wm.checkClaimMinerIdentity(workerID, pub, req.MinerAddress); !okID {
+			if okID, reasonID := wm.checkReleaseMinerIdentity(workerID, pub, req.MinerAddress); !okID {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusForbidden)
 				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "reason": reasonID})
