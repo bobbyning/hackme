@@ -115,8 +115,16 @@ func ValidateHmsTransferShape(tx HmsTransferTx) (code, msg string) {
 	if tx.TxType != "transfer_hms_v1" {
 		return "invalid_tx_type", "tx_type must be transfer_hms_v1"
 	}
-	if !strings.HasPrefix(strings.TrimSpace(tx.From), "HMC-") || !strings.HasPrefix(strings.TrimSpace(tx.To), "HMC-") {
+	from := strings.TrimSpace(tx.From)
+	to := strings.TrimSpace(tx.To)
+	if from == "" || to == "" || !strings.HasPrefix(from, "HMC-") || !strings.HasPrefix(to, "HMC-") {
 		return "invalid_address", "from/to must be HMC- addresses"
+	}
+	// Parity with the HMC lane and the report #30 SUP fix: self-sends are rejected.
+	// Without this, the recipient UPSERT in applyPendingHmsTransfers would clobber
+	// the sender debit and mint HMS.
+	if from == to {
+		return "invalid_address", "from/to must differ"
 	}
 	if tx.AmountUnits == 0 {
 		return "invalid_amount", "amount_units must be > 0"
@@ -569,18 +577,14 @@ func (s *Service) applyPendingHmsTransfers(ctx context.Context, txq queryRowExec
 			_, _ = txq.ExecContext(ctx, `DELETE FROM hms_tx_pool WHERE tx_hash=?`, item.hash)
 			continue
 		}
-		var fromBal, fromNonce, toBal uint64
+		var fromBal, fromNonce uint64
 		if err := txq.QueryRowContext(ctx, `SELECT COALESCE(balance_hms_units,0), COALESCE(hms_next_nonce,0) FROM accounts WHERE address=?`, item.tx.From).
 			Scan(&fromBal, &fromNonce); err != nil {
-			return err
-		}
-		if err := txq.QueryRowContext(ctx, `SELECT COALESCE(balance_hms_units,0) FROM accounts WHERE address=?`, item.tx.To).Scan(&toBal); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		total := item.tx.AmountUnits + item.tx.FeeUnits
 		fromBal -= total
 		fromNonce++
-		toBal += item.tx.AmountUnits
 		burnFee := uint64(float64(item.tx.FeeUnits) * HMSNetworkFeeBurnShare)
 		treasuryFee := item.tx.FeeUnits - burnFee
 		if _, err := txq.ExecContext(ctx,
@@ -588,12 +592,18 @@ func (s *Service) applyPendingHmsTransfers(ctx context.Context, txq queryRowExec
 			fromBal, fromNonce, item.tx.From); err != nil {
 			return err
 		}
-		if _, err := txq.ExecContext(ctx,
-			`INSERT INTO accounts (address, balance_units, balance_hms_units, next_nonce, hms_next_nonce, updated_at)
-			 VALUES (?, 0, ?, 0, 0, strftime('%s','now'))
-			 ON CONFLICT(address) DO UPDATE SET balance_hms_units=excluded.balance_hms_units, updated_at=excluded.updated_at`,
-			item.tx.To, toBal); err != nil {
-			return err
+		// Credit via SQL arithmetic (not a pre-debit Go read): if From==To somehow
+		// slipped past validation, a precomputed UPSERT would mint HMS. Skip the
+		// recipient write entirely on self-send so the debit alone remains
+		// (same hardening as the SUP applier after report #30).
+		if item.tx.From != item.tx.To {
+			if _, err := txq.ExecContext(ctx,
+				`INSERT INTO accounts (address, balance_units, balance_hms_units, next_nonce, hms_next_nonce, updated_at)
+				 VALUES (?, 0, ?, 0, 0, strftime('%s','now'))
+				 ON CONFLICT(address) DO UPDATE SET balance_hms_units=accounts.balance_hms_units + excluded.balance_hms_units, updated_at=excluded.updated_at`,
+				item.tx.To, item.tx.AmountUnits); err != nil {
+				return err
+			}
 		}
 		if treasuryFee > 0 {
 			if _, err := txq.ExecContext(ctx,
