@@ -213,6 +213,7 @@ ops/settlement.env.example
 # --- export / publish / pack lab ---
 ops/export_*.py
 !ops/export_hunt_daily_rollup.py
+!ops/export_hunt_weekly_rollup.py
 !ops/export_hunt_watch_rollup.py
 !ops/export_oss_cve_html.py
 ops/export_*.sh
