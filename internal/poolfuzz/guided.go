@@ -118,5 +118,11 @@ func (s *Service) buildClaimedWork(ctx context.Context, campaignID string, itemI
 		CoverageKind:         fuzzengine.CoverageKind(cfg),
 		CorpusSeeds:          corpusSeeds,
 		CorpusSnapshotSHA256: corpusSHA,
+		// Dig segment execs rebuild cfg from the claim; mirror SegmentExecInput gates.
+		PowerMutCap:     fuzzengine.PowerMutCap(cfg),
+		HavocDeepV28:    fuzzengine.DeepHavocV28(cfg),
+		HavocDeepV210:   fuzzengine.DeepHavocV210(cfg),
+		DigGPUMutators:  fuzzengine.DigGPUMutatorsEnabled(cfg),
+		CorpusExploreV2: fuzzengine.CorpusExploreV2Enabled(cfg),
 	}, nil
 }

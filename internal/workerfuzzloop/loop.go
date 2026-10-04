@@ -65,6 +65,9 @@ type ClaimResp struct {
 	PowerMutCap   int  `json:"power_mut_cap,omitempty"`
 	HavocDeepV28  bool `json:"havoc_deep_v28,omitempty"`
 	HavocDeepV210 bool `json:"havoc_deep_v210,omitempty"`
+	// DigGPUMutators / CorpusExploreV2 mirror SegmentExecInput gates (report #31).
+	DigGPUMutators  bool `json:"dig_gpu_mutators,omitempty"`
+	CorpusExploreV2 bool `json:"corpus_explore_v2,omitempty"`
 	// SeedByteCorpus mirrors the campaign seed_byte_corpus so worker-side exec input
 	// derivation stays identical to the coordinator's verification replay.
 	SeedByteCorpus []any `json:"seed_byte_corpus,omitempty"`
@@ -574,6 +577,21 @@ func RunSegmentCheck(ctx context.Context, cr ClaimResp, timeoutMS int) (checkRes
 	}
 	if strings.EqualFold(cr.InputMode, "bytes") {
 		cfg["input_mode"] = "bytes"
+	}
+	if cr.PowerMutCap > 0 {
+		cfg["power_mut_cap"] = cr.PowerMutCap
+	}
+	if cr.HavocDeepV28 {
+		cfg["havoc_deep_v28"] = true
+	}
+	if cr.HavocDeepV210 {
+		cfg["havoc_deep_v210"] = true
+	}
+	if cr.DigGPUMutators {
+		cfg["dig_gpu_mutators"] = true
+	}
+	if cr.CorpusExploreV2 {
+		cfg["corpus_explore_v2"] = true
 	}
 	seeds, _ := fuzzengine.CorpusSeedsFromClaimMaps(cr.CorpusSeeds)
 	if len(seeds) > 0 {

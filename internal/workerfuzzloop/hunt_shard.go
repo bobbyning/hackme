@@ -160,6 +160,12 @@ func huntShardConfigFromClaim(cr ClaimResp, corpusGuided bool) map[string]any {
 	if cr.HavocDeepV210 {
 		cfg["havoc_deep_v210"] = true
 	}
+	if cr.DigGPUMutators {
+		cfg["dig_gpu_mutators"] = true
+	}
+	if cr.CorpusExploreV2 {
+		cfg["corpus_explore_v2"] = true
+	}
 	if len(cr.SeedByteCorpus) > 0 {
 		// Campaign seed_byte_corpus (LF-imported or pack byte seeds): the replay side
 		// prefers corpus round-robin bases for mutating execs, so the worker cfg must

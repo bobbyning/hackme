@@ -634,6 +634,22 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 		if sha := strings.TrimSpace(work.CorpusSnapshotSHA256); sha != "" {
 			payload["corpus_snapshot_sha256"] = sha
 		}
+		// Dig + Hunt: SegmentExecInput gates must ride on every claim, not only hunt_shard.
+		if work.PowerMutCap > 0 {
+			payload["power_mut_cap"] = work.PowerMutCap
+		}
+		if work.HavocDeepV28 {
+			payload["havoc_deep_v28"] = true
+		}
+		if work.HavocDeepV210 {
+			payload["havoc_deep_v210"] = true
+		}
+		if work.DigGPUMutators {
+			payload["dig_gpu_mutators"] = true
+		}
+		if work.CorpusExploreV2 {
+			payload["corpus_explore_v2"] = true
+		}
 		if work.TaskClass == "hunt" || work.WorkKind == "hunt_shard" {
 			payload["task_class"] = "hunt"
 			payload["work_kind"] = "hunt_shard"
@@ -656,16 +672,6 @@ func addFuzzPoolRoutes(mux *http.ServeMux, adminToken, workerToken string, allow
 				payload["harness_content_sha256"] = sha
 			}
 			payload["hunt_detect_leaks"] = work.HuntDetectLeaks
-			// Mutation scheduling — workers must derive the same exec inputs as replay.
-			if work.PowerMutCap > 0 {
-				payload["power_mut_cap"] = work.PowerMutCap
-			}
-			if work.HavocDeepV28 {
-				payload["havoc_deep_v28"] = true
-			}
-			if work.HavocDeepV210 {
-				payload["havoc_deep_v210"] = true
-			}
 			if len(work.SeedByteCorpus) > 0 {
 				// Same contract as the mutation-scheduling keys above: the worker must
 				// derive the same exec inputs as the verification replay.

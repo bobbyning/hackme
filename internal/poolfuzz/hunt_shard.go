@@ -53,6 +53,8 @@ func (s *Service) buildHuntClaimedWork(ctx context.Context, campaignID string, i
 	mutCap := fuzzengine.PowerMutCap(cfg)
 	deepV28 := fuzzengine.DeepHavocV28(cfg)
 	deepV210 := fuzzengine.DeepHavocV210(cfg)
+	digGPU := fuzzengine.DigGPUMutatorsEnabled(cfg)
+	exploreV2 := fuzzengine.CorpusExploreV2Enabled(cfg)
 	now := time.Now().Unix()
 	var inputB []byte
 	var inputU uint64
@@ -110,6 +112,8 @@ func (s *Service) buildHuntClaimedWork(ctx context.Context, campaignID string, i
 		PowerMutCap:          mutCap,
 		HavocDeepV28:         deepV28,
 		HavocDeepV210:        deepV210,
+		DigGPUMutators:       digGPU,
+		CorpusExploreV2:      exploreV2,
 		SeedByteCorpus:       seedCorpus,
 	}, nil
 }

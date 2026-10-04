@@ -90,6 +90,10 @@ type ClaimedWork struct {
 	PowerMutCap   int
 	HavocDeepV28  bool
 	HavocDeepV210 bool
+	// DigGPUMutators / CorpusExploreV2 gate SegmentExecInput the same way as the
+	// campaign cfg; without claim propagation worker stream A ≠ coordinator stream B.
+	DigGPUMutators  bool
+	CorpusExploreV2 bool
 	// SeedByteCorpus mirrors the campaign seed_byte_corpus (LF-imported or pack byte
 	// seeds) onto the claim: the verification replay derives mutating exec bases from
 	// it (corpus round-robin), so the worker must rebuild its cfg with the same corpus

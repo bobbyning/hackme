@@ -50,6 +50,8 @@ func TestHuntShardConfigCarriesMutationScheduling(t *testing.T) {
 		PowerMutCap:      14,
 		HavocDeepV28:     true,
 		HavocDeepV210:    true,
+		DigGPUMutators:   true,
+		CorpusExploreV2:  true,
 	}, true)
 	if got := fuzzengine.PowerMutCap(cfg); got != 14 {
 		t.Fatalf("power_mut_cap: want 14 got %d", got)
@@ -59,6 +61,12 @@ func TestHuntShardConfigCarriesMutationScheduling(t *testing.T) {
 	}
 	if !fuzzengine.DeepHavocV210(cfg) {
 		t.Fatal("claim with havoc_deep_v210 must enable the v2.10 burst")
+	}
+	if !fuzzengine.DigGPUMutatorsEnabled(cfg) {
+		t.Fatal("claim with dig_gpu_mutators must enable Dig GPU gate")
+	}
+	if !fuzzengine.CorpusExploreV2Enabled(cfg) {
+		t.Fatal("claim with corpus_explore_v2 must enable explore weights")
 	}
 
 	legacy := huntShardConfigFromClaim(ClaimResp{
@@ -72,6 +80,12 @@ func TestHuntShardConfigCarriesMutationScheduling(t *testing.T) {
 	}
 	if fuzzengine.DeepHavocV210(legacy) {
 		t.Fatal("claims without havoc_deep_v210 must not enable burst")
+	}
+	if fuzzengine.DigGPUMutatorsEnabled(legacy) {
+		t.Fatal("claims without dig_gpu_mutators must not enable Dig GPU gate")
+	}
+	if fuzzengine.CorpusExploreV2Enabled(legacy) {
+		t.Fatal("claims without corpus_explore_v2 must not enable explore weights")
 	}
 	if got := fuzzengine.PowerMutCap(legacy); got != 12 {
 		t.Fatalf("legacy power_mut_cap default: want 12 got %d", got)
@@ -94,6 +108,7 @@ func TestHuntClaimConfigMatchesCampaignExecInputsV210(t *testing.T) {
 		PowerMutCap:      14,
 		HavocDeepV28:     true,
 		HavocDeepV210:    true,
+		CorpusExploreV2:  true,
 	}, true)
 	for inputN := uint64(0); inputN < 4; inputN++ {
 		for exec := uint64(0); exec < 4; exec++ {
@@ -102,6 +117,52 @@ func TestHuntClaimConfigMatchesCampaignExecInputsV210(t *testing.T) {
 			if string(want) != string(got) {
 				t.Fatalf("v210 inputN=%d exec=%d: worker/replay diverged", inputN, exec)
 			}
+		}
+	}
+}
+
+func TestHuntClaimConfigMatchesCampaignExecInputsDigGPU(t *testing.T) {
+	// Report #31: dig_gpu_mutators on the campaign but missing from the claim
+	// rebuilt cfg splits worker stream A from coordinator stream B.
+	campaign := campaignCfgFixture()
+	campaign["dig_gpu_mutators"] = true
+	campaign["havoc_deep_v210"] = true
+
+	missing := huntShardConfigFromClaim(ClaimResp{
+		UpstreamTargetID: "jsmn",
+		MaxInputBytes:    128,
+		ExecPerUnit:      8,
+		DepthTier:        "oss_cve",
+		CoverageKind:     "hunt_corpus_guided",
+		PowerMutCap:      14,
+		HavocDeepV28:     true,
+		HavocDeepV210:    true,
+		CorpusExploreV2:  true,
+	}, true)
+	inputN := uint64(424242)
+	_, missB := fuzzengine.SegmentExecInput(inputN, 3, missing, nil)
+	_, campB := fuzzengine.SegmentExecInput(inputN, 3, campaign, nil)
+	if bytes.Equal(missB, campB) {
+		t.Fatal("premise: dig_gpu_mutators must change SegmentExecInput without claim mirror")
+	}
+
+	fixed := huntShardConfigFromClaim(ClaimResp{
+		UpstreamTargetID: "jsmn",
+		MaxInputBytes:    128,
+		ExecPerUnit:      8,
+		DepthTier:        "oss_cve",
+		CoverageKind:     "hunt_corpus_guided",
+		PowerMutCap:      14,
+		HavocDeepV28:     true,
+		HavocDeepV210:    true,
+		DigGPUMutators:   true,
+		CorpusExploreV2:  true,
+	}, true)
+	for exec := uint64(0); exec < 8; exec++ {
+		want := hunt.ShardSegmentExecInput("camp-dig", inputN, exec, campaign, nil)
+		got := hunt.ShardSegmentExecInput("camp-dig", inputN, exec, fixed, nil)
+		if string(want) != string(got) {
+			t.Fatalf("dig_gpu inputN=%d exec=%d: worker/replay diverged (%d vs %d bytes)", inputN, exec, len(want), len(got))
 		}
 	}
 }
@@ -137,6 +198,7 @@ func claimForCampaign() ClaimResp {
 		CoverageKind:     "hunt_corpus_guided",
 		PowerMutCap:      14,
 		HavocDeepV28:     true,
+		CorpusExploreV2:  true,
 	}
 }
 
