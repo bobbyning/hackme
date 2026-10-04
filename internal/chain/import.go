@@ -225,6 +225,9 @@ func (s *Service) ImportPoHBlock(ctx context.Context, b *block.Block) error {
 	if err := s.applyPendingSupTransfers(ctx, tx, b.Index, b.Hash); err != nil {
 		return err
 	}
+	if err := s.applyPendingHmsTransfers(ctx, tx, b.Index, b.Hash); err != nil {
+		return err
+	}
 
 	// Advance target mod using the imported block's timestamp (matches AppendPoHBlock retarget).
 	nextMod, err := s.nextPoHTargetModTx(ctx, tx, b, chainMod)
