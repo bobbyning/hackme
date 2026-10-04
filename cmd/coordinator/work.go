@@ -491,6 +491,11 @@ func (m *workManager) targetModMaxOrDefault() uint64 {
 // Dominated by fleet GH/s; this nudges M up when many small rigs join (100k miners scenario).
 const poolGHEMAAlpha = 0.3
 
+// poolStallEaseFoundGapSec is how long without an accepted found before the pool
+// counts as stalled for M easing. Conservative: far above a healthy sparse-found
+// cadence, and the load retarget pushes M back up on its next tick regardless.
+const poolStallEaseFoundGapSec int64 = 3600
+
 // smoothPoolGHSample updates fleet GH/s EMA; fast-tracks when measured hash jumps (GPU came online).
 func (m *workManager) smoothPoolGHSample(raw float64) float64 {
 	if m == nil || raw <= 0 || math.IsNaN(raw) || math.IsInf(raw, 0) {
@@ -830,9 +835,17 @@ func (m *workManager) maybeRetargetPoolMod(now int64) {
 // maybeEasePoolModOnStallLocked eases M when no accepted found has landed for a long stretch.
 // Unlike maybeRetargetPoolMod (found-triggered), this does not require / invent lastFoundHitUnix
 // — covers the report #29 freeze where find-gap easing was unreachable.
+// A pool that found earlier and then went silent counts as stalled too: gating on
+// lastFoundHitUnix == 0 only armed this path while no found had EVER landed since
+// boot, which is not the realistic freeze shape (a running pool whose finds stop
+// later, e.g. a future eval residue class turning the gate unsatisfiable).
 // Caller must hold m.mu.
 func (m *workManager) maybeEasePoolModOnStallLocked(now int64) {
-	if !m.poolRetarget || m.lastFoundHitUnix > 0 {
+	if !m.poolRetarget {
+		return
+	}
+	// A recent accepted found means the gate is solvable — not stalled.
+	if m.lastFoundHitUnix > 0 && now-m.lastFoundHitUnix < poolStallEaseFoundGapSec {
 		return
 	}
 	anchor := m.targetModUpdatedUnix
@@ -1893,11 +1906,13 @@ func (m *workManager) submit(req submitWorkRequest) (accepted bool, reason strin
 			}
 		}
 		m.mu.Lock()
+		// Refresh after the relay so the found-dedup timestamp reflects chain-ACK time,
+		// not submit-entry time (stall easing consumes lastFoundHitUnix).
+		now = time.Now().Unix()
 		// V2-H1: after chain ACK, mark found dedup immediately so lease expiry cannot skip it.
 		if chainSolve.OK && req.Found {
 			m.recordFoundDedupLocked(req.FoundNonce, resultHashKey, now)
 		}
-		now = time.Now().Unix()
 		rec, ok = m.active[k]
 		if chainSolve.OK {
 			if !ok || rec.WorkerID != req.WorkerID || rec.ExpiresAt < now {
