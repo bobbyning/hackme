@@ -165,7 +165,7 @@ func TestReport28ClaimLaneStillIdentityBeforeRate(t *testing.T) {
 
 	for i := 0; i < 30; i++ {
 		code, out := report28Post(t, mux, "/api/fuzz/work/claim", map[string]any{
-			"worker_id": "victim-rig-03",
+			"worker_id":    "victim-rig-03",
 			"miner_pubkey": hex.EncodeToString(atkPub), "miner_address": signerAddr(atkPub),
 		})
 		reason, _ := out["reason"].(string)
@@ -174,7 +174,7 @@ func TestReport28ClaimLaneStillIdentityBeforeRate(t *testing.T) {
 		}
 	}
 	code, out := report28Post(t, mux, "/api/fuzz/work/claim", map[string]any{
-		"worker_id": "victim-rig-03",
+		"worker_id":    "victim-rig-03",
 		"miner_pubkey": hex.EncodeToString(vicPub), "miner_address": signerAddr(vicPub),
 	})
 	if out["reason"] == "claim_rate_limited" {
