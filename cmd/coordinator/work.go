@@ -1906,11 +1906,13 @@ func (m *workManager) submit(req submitWorkRequest) (accepted bool, reason strin
 			}
 		}
 		m.mu.Lock()
+		// Refresh after the relay so the found-dedup timestamp reflects chain-ACK time,
+		// not submit-entry time (stall easing consumes lastFoundHitUnix).
+		now = time.Now().Unix()
 		// V2-H1: after chain ACK, mark found dedup immediately so lease expiry cannot skip it.
 		if chainSolve.OK && req.Found {
 			m.recordFoundDedupLocked(req.FoundNonce, resultHashKey, now)
 		}
-		now = time.Now().Unix()
 		rec, ok = m.active[k]
 		if chainSolve.OK {
 			if !ok || rec.WorkerID != req.WorkerID || rec.ExpiresAt < now {
