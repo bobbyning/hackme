@@ -31,6 +31,7 @@ Reports: `reports/tests/security_full_20260828T190633Z/` · `reports/gates/redte
 | Release lane must not create payout locks; admin unbind recovers (report #27) | `checkReleaseMinerIdentity` + `/api/work/admin/unbind-payout-lock` |
 | Submit worker rate slot charged only after signature / payout-lock (report #28) | `allowSubmitPeer` + `chargeSubmitWorker` |
 | Pool `target_mod` never pins on a multiple of 7 (unsatisfiable `7n+13` gate); persist load sanitizes; stall easing without a prior found (report #29) | `clampTargetMod` / `sanitizePoolTargetMod7n13` / `maybeRetargetPoolMod` |
+| SUP self-transfer rejected; applier credits via SQL increment and skips self-credit (report #30 mint) | `ValidateSupTransferShape` / `applyPendingSupTransfers` |
 | Release must not charge claim buckets on forgeable ids | `allowClaimPeer` on `/api/fuzz/work/release` |
 | Claim binds payout lock only after successful lease; failed claim does not squat | `bindClaimPayoutFromPub` after Claim/claim ok |
 | PoH submit keeps lease on signature failures; peer IP only on accept | `submit()` + handler gate |
