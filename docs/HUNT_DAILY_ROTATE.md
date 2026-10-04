@@ -7,6 +7,13 @@ Aspirational catalog IDs without drivers live under `rotation.deferred_until_dri
 
 Covers up to 24 libraries/day (queue wraps). Watch `reports/hunt-daily/YYYYMMDD/ROLLUP.md`.
 
+Weekly honesty ledger (families/signatures across days, not raw crashes):
+
+```bash
+python3 scripts/ops/export_hunt_weekly_rollup.py
+# → reports/hunt-weekly/YYYYMMDD-YYYYMMDD/WEEKLY.md
+```
+
 ## Quick start
 
 ```bash

@@ -289,6 +289,7 @@
         "src/ucl_schema.c",
         "src/ucl_emitter.c",
         "src/ucl_emitter_utils.c",
+        "src/ucl_cbor.c",
         "src/ucl_msgpack.c",
         "src/ucl_sexp.c"
       ],
