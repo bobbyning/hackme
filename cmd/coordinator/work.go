@@ -33,6 +33,11 @@ const maxCoordinatorJSONBodyBytes = 2 << 20 // 2 MiB (large wasm hex + corpus se
 type workManager struct {
 	nextNonce atomic.Uint64
 
+	// payoutLockMu serializes durable payout-lock writes (persist vs clear) so
+	// an in-flight claim cannot re-insert a binding an admin unbind just deleted.
+	// Order: payoutLockMu -> m.mu; never the reverse.
+	payoutLockMu sync.Mutex
+
 	defaultBatch    uint64
 	maxClaimBatch   uint64 // hard cap on claim/submit batch_size (anti inflation)
 	targetMod       uint64
@@ -176,9 +181,13 @@ type workerPayoutStat struct {
 	LastPoHSeenUnix int64 `json:"last_poh_seen_unix,omitempty"`
 	// LastFuzzSeenUnix is refreshed on fuzz claim/submit. Required (with PoH) to count
 	// as hybrid Dig/Hunt capacity — PoH-only miners must not throttle dig-only fleets.
-	LastFuzzSeenUnix int64  `json:"last_fuzz_seen_unix,omitempty"`
-	LastClientIP     string `json:"last_client_ip,omitempty"`
-	Online           bool   `json:"online,omitempty"`
+	LastFuzzSeenUnix int64 `json:"last_fuzz_seen_unix,omitempty"`
+	// LockSeenUnix throttles the durable payout-lock seen_at refresh (at most
+	// once per hour per worker) so active bindings survive idle-GC without a
+	// DB write on every lock read.
+	LockSeenUnix int64  `json:"-"`
+	LastClientIP string `json:"last_client_ip,omitempty"`
+	Online       bool   `json:"online,omitempty"`
 }
 
 type workerAbuseState struct {
@@ -3049,10 +3058,48 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxCoordinatorJSONBodyBytes)
 		var req struct {
-			WorkerID string `json:"worker_id"`
+			WorkerID  string   `json:"worker_id"`
+			WorkerIDs []string `json:"worker_ids"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if len(req.WorkerIDs) > 0 {
+			if len(req.WorkerIDs) > 256 {
+				http.Error(w, "too many worker_ids (max 256)", http.StatusBadRequest)
+				return
+			}
+			ids := make([]string, 0, len(req.WorkerIDs))
+			for _, id := range req.WorkerIDs {
+				id = strings.TrimSpace(id)
+				if id == "" || !validCoordinatorWorkerID(id) {
+					http.Error(w, "invalid worker_id in worker_ids", http.StatusBadRequest)
+					return
+				}
+				ids = append(ids, id)
+			}
+			clearedN := 0
+			failed := []map[string]string{}
+			for _, id := range ids {
+				did, _, uerr := wm.clearPayoutLock(id)
+				if uerr != nil {
+					failed = append(failed, map[string]string{"worker_id": id, "error": uerr.Error()})
+					continue
+				}
+				if did {
+					clearedN++
+				}
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			if len(failed) > 0 {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":      len(failed) == 0,
+				"cleared": clearedN,
+				"failed":  failed,
+			})
 			return
 		}
 		workerID := strings.TrimSpace(req.WorkerID)
@@ -3060,8 +3107,17 @@ func addWorkRoutes(mux *http.ServeMux, adminToken, workerToken string, allowInse
 			http.Error(w, "invalid worker_id", http.StatusBadRequest)
 			return
 		}
-		cleared, prev := wm.clearPayoutLock(workerID)
+		cleared, prev, uerr := wm.clearPayoutLock(workerID)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if uerr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":        false,
+				"error":     uerr.Error(),
+				"worker_id": workerID,
+			})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":               true,
 			"cleared":          cleared,
