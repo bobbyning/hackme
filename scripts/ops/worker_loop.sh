@@ -57,20 +57,33 @@ if [[ "$TOKEN" == *"..."* || "$TOKEN" == *"PUT_FULL_TOKEN_HERE"* || "$TOKEN" == 
   exit 1
 fi
 
+MINER_PUBKEY_HEX=""
 if [[ "$SIGN_SUBMITS" == "1" ]]; then
   if [[ -z "${HACKME_MINER_ED25519_SEED_HEX:-}" ]]; then
     echo "[worker] HACKME_WORKER_SIGN_SUBMITS=1 requires HACKME_MINER_ED25519_SEED_HEX (64 hex chars = 32-byte seed). Generate: go run ./cmd/minersign -gen-seed" >&2
     exit 1
   fi
   if [[ -z "$MINERSIGN_BIN" ]]; then
-    if [[ -x "${ROOT_DIR}/minersign" ]]; then
+    if [[ -x "${ROOT_DIR}/bin/minersign" ]]; then
+      MINERSIGN_BIN="${ROOT_DIR}/bin/minersign"
+    elif [[ -x "${ROOT_DIR}/minersign" ]]; then
       MINERSIGN_BIN="${ROOT_DIR}/minersign"
     elif command -v minersign >/dev/null 2>&1; then
       MINERSIGN_BIN="$(command -v minersign)"
     else
-      echo "[worker] minersign binary not found; build: (cd ${ROOT_DIR} && go build -o minersign ./cmd/minersign) or set MINERSIGN_BIN=" >&2
+      echo "[worker] minersign binary not found; build: (cd ${ROOT_DIR} && go build -o bin/minersign ./cmd/minersign) or set MINERSIGN_BIN=" >&2
       exit 1
     fi
+  fi
+  # Coordinator hybrid claims require miner_pubkey (claim_pubkey_required).
+  MINER_PUBKEY_HEX="$(
+    jq -nc '{worker_id:"pubkey-probe",base_nonce:0,batch_size:1,work_id:"pubkey-probe",attempts:1,found:false,found_nonce:0,result_hash:"",proof_hash:""}' \
+      | env HACKME_MINER_ED25519_SEED_HEX="$HACKME_MINER_ED25519_SEED_HEX" "$MINERSIGN_BIN" --nonce-file "${NONCE_FILE}.pubkey-probe" \
+      | jq -r '.miner_pubkey_ed25519 // empty'
+  )"
+  if [[ ${#MINER_PUBKEY_HEX} -ne 64 ]]; then
+    echo "[worker] failed to derive miner_pubkey_ed25519 from seed (got len=${#MINER_PUBKEY_HEX})" >&2
+    exit 1
   fi
 fi
 
@@ -142,14 +155,23 @@ push_work_snapshot() {
 
 echo "[worker] start id=${WORKER_ID} coord=${COORD_URL} batch=${BATCH_SIZE}"
 if [[ "$SIGN_SUBMITS" == "1" ]]; then
-  echo "[worker] hybrid signer: submits will carry miner_pubkey_ed25519 + miner_sig_ed25519 + submit_nonce (nonce file=${NONCE_FILE})"
+  echo "[worker] hybrid signer: claims+submits carry miner_pubkey_ed25519; submits also miner_sig_ed25519 + submit_nonce (nonce file=${NONCE_FILE})"
 fi
 echo "[worker] note: HASHRATE_GHS env seeds EMA only; sustained GH/s ≈ batch_size / full claim+submit seconds (often ~0.002–0.02 GH/s), not GPU saturation."
 
 while true; do
   # Full claim→submit wall time matches credited batch throughput (pool GH/s / global TH/s).
   t_cycle_start="$(date +%s%N)"
-  claim="$(api_post "/api/work/claim" "{\"worker_id\":\"${WORKER_ID}\",\"batch_size\":${BATCH_SIZE}}" 2>/dev/null || true)"
+  if [[ "$SIGN_SUBMITS" == "1" && -n "$MINER_PUBKEY_HEX" ]]; then
+    claim_body="$(jq -nc \
+      --arg wid "$WORKER_ID" \
+      --argjson batch "$BATCH_SIZE" \
+      --arg pub "$MINER_PUBKEY_HEX" \
+      '{worker_id:$wid,batch_size:$batch,miner_pubkey:$pub,miner_pubkey_ed25519:$pub}')"
+  else
+    claim_body="$(jq -nc --arg wid "$WORKER_ID" --argjson batch "$BATCH_SIZE" '{worker_id:$wid,batch_size:$batch}')"
+  fi
+  claim="$(api_post "/api/work/claim" "$claim_body" 2>/dev/null || true)"
   ok="$(printf '%s' "$claim" | jq -r '.ok // false' 2>/dev/null || echo "false")"
   if [[ "$ok" != "true" ]]; then
     reason="$(printf '%s' "$claim" | jq -r '.reason // "claim_failed"' 2>/dev/null || echo "claim_failed")"

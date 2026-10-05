@@ -4,7 +4,7 @@
   "cve_candidates": [],
   "informational_targets": [],
   "clean_targets": [
-    "supernovas"
+    "libcbor"
   ],
   "hold_disclosure": [
     "centijson",
@@ -29,8 +29,8 @@
     "wren",
     "gpslib"
   ],
-  "wave": "supernovas",
-  "started_at": "2026-09-22T05:04:29Z",
-  "finished_at": "2026-09-22T05:13:46Z",
+  "wave": "libcbor",
+  "started_at": "2026-10-05T11:19:03Z",
+  "finished_at": "2026-10-05T11:45:45Z",
   "publish_allowed": true
 }
