@@ -33,6 +33,11 @@ const maxCoordinatorJSONBodyBytes = 2 << 20 // 2 MiB (large wasm hex + corpus se
 type workManager struct {
 	nextNonce atomic.Uint64
 
+	// payoutLockMu serializes durable payout-lock writes (persist vs clear) so
+	// an in-flight claim cannot re-insert a binding an admin unbind just deleted.
+	// Order: payoutLockMu -> m.mu; never the reverse.
+	payoutLockMu sync.Mutex
+
 	defaultBatch    uint64
 	maxClaimBatch   uint64 // hard cap on claim/submit batch_size (anti inflation)
 	targetMod       uint64

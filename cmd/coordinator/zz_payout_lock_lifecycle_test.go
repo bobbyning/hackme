@@ -299,3 +299,98 @@ func TestPayoutLockTouchIsThrottled(t *testing.T) {
 		t.Fatalf("expired throttle did not refresh: %d", s4)
 	}
 }
+
+func TestPayoutLockLookupFailsClosedOnDBError(t *testing.T) {
+	db, wm, _ := payoutLockSetup(t)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// memory miss + broken durable store must not read as "no binding"
+	if addr := wm.lockedPayoutAddress("wk-nn"); addr != payoutLockLookupFailed {
+		t.Fatalf("lookup on broken store = %q, want the fail-closed sentinel", addr)
+	}
+}
+
+func TestPayoutLockEvictedReadRefreshesSeenAt(t *testing.T) {
+	db, wm, _ := payoutLockSetup(t)
+	wm.persistPayoutLock("wk-ev", "HMC-5678567856785678")
+	if _, err := db.Exec(`UPDATE worker_payout_lock SET seen_at=100 WHERE worker_id=?`, "wk-ev"); err != nil {
+		t.Fatal(err)
+	}
+	// drop the binding from the warm cache as if evicted by the load cap
+	wm.mu.Lock()
+	delete(wm.worker, "wk-ev")
+	wm.mu.Unlock()
+	if addr := wm.lockedPayoutAddress("wk-ev"); addr != "HMC-5678567856785678" {
+		t.Fatalf("fallback read: %q", addr)
+	}
+	if _, seen, ok := payoutLockSeen(t, db, "wk-ev"); !ok || seen <= 100 {
+		t.Fatalf("first fallback read did not refresh liveness: ok=%v seen=%d", ok, seen)
+	}
+}
+
+func TestPayoutLockTouchFailureRetriesImmediately(t *testing.T) {
+	db, wm, _ := payoutLockSetup(t)
+	wm.persistPayoutLock("wk-rt", "HMC-8765876587658765")
+	_ = wm.lockedPayoutAddress("wk-rt") // cache
+	_ = wm.lockedPayoutAddress("wk-rt") // memory-hit touch
+	backdated := time.Now().Unix() - 7200
+	if _, err := db.Exec(`UPDATE worker_payout_lock SET seen_at=100 WHERE worker_id=?`, "wk-rt"); err != nil {
+		t.Fatal(err)
+	}
+	wm.mu.Lock()
+	st := wm.worker["wk-rt"]
+	st.LockSeenUnix = backdated
+	wm.worker["wk-rt"] = st
+	wm.mu.Unlock()
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = wm.lockedPayoutAddress("wk-rt") // touch attempt must fail
+	wm.mu.Lock()
+	got := wm.worker["wk-rt"].LockSeenUnix
+	wm.mu.Unlock()
+	if got != backdated {
+		t.Fatalf("throttle advanced despite failed touch: %d want %d", got, backdated)
+	}
+}
+
+func TestLoadPayoutLocksRespectsMaxWorkers(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "pl-cap.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	warm := &workManager{worker: map[string]workerPayoutStat{}}
+	warm.attachDedupDB(db) // create the schema before the inserts below
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().Unix() - 5000
+	for i := 0; i < 5; i++ {
+		if _, err := tx.Exec(`INSERT INTO worker_payout_lock(worker_id, payout_address, seen_at) VALUES(?,?,?)`,
+			fmt.Sprintf("wk-m%d", i), fmt.Sprintf("HMC-m%d", i), base+int64(i)); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	wm := &workManager{worker: map[string]workerPayoutStat{}, maxWorkers: 3}
+	wm.attachDedupDB(db)
+	if got := len(wm.worker); got != 3 {
+		t.Fatalf("warm-up loaded %d bindings, want the maxWorkers cap of 3", got)
+	}
+	if _, ok := wm.worker["wk-m4"]; !ok {
+		t.Fatal("newest binding missing despite newest-first order")
+	}
+	if _, ok := wm.worker["wk-m0"]; ok {
+		t.Fatal("binding beyond the cap was loaded")
+	}
+	if addr := wm.lockedPayoutAddress("wk-m0"); addr != "HMC-m0" {
+		t.Fatalf("capped binding lost enforcement via fallback: %q", addr)
+	}
+}

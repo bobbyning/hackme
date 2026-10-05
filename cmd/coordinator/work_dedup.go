@@ -73,6 +73,11 @@ func ensurePayoutLockSeenAt(db *sql.DB) error {
 			return err
 		}
 	}
+	// Index comes after the upgrade: an old-schema table lacks seen_at while the
+	// stmts above run, so creating the index there would fail the migration.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_worker_payout_lock_seen ON worker_payout_lock(seen_at)`); err != nil {
+		return err
+	}
 	if _, err := db.Exec(`UPDATE worker_payout_lock SET seen_at=? WHERE seen_at=0`, time.Now().Unix()); err != nil {
 		return err
 	}
@@ -251,6 +256,11 @@ func (m *workManager) loadPayoutLocks() {
 		m.worker = map[string]workerPayoutStat{}
 	}
 	for _, r := range loaded {
+		if m.maxWorkers > 0 && len(m.worker) >= m.maxWorkers {
+			// Newest-first: keep the freshest bindings within the worker cap;
+			// the rest fall back to the durable row per read.
+			break
+		}
 		st := m.worker[r.id]
 		if strings.TrimSpace(st.PayoutAddress) == "" {
 			st.PayoutAddress = r.addr
@@ -284,13 +294,21 @@ func (m *workManager) lockedPayoutAddress(workerID string) string {
 	// binding (the durable row would otherwise age from first-bind only).
 	now := time.Now().Unix()
 	touch := locked != "" && now-cur.LockSeenUnix >= payoutLockTouchIntervalSec
-	if touch {
-		cur.LockSeenUnix = now
-		m.worker[workerID] = cur
-	}
 	m.mu.Unlock()
 	if touch {
-		m.touchPayoutLockSeenAt(workerID)
+		if terr := m.touchPayoutLockSeenAt(workerID); terr == nil {
+			// Advance the throttle only after the write succeeded, so a transient
+			// DB failure retries on the next lock read instead of after an hour.
+			m.mu.Lock()
+			st := m.worker[workerID]
+			if now > st.LockSeenUnix {
+				st.LockSeenUnix = now
+				m.worker[workerID] = st
+			}
+			m.mu.Unlock()
+		} else {
+			log.Printf("payout lock touch failed: worker_id=%q err=%v", workerID, terr)
+		}
 	}
 	if locked != "" || db == nil || workerID == "" {
 		return locked
@@ -298,6 +316,12 @@ func (m *workManager) lockedPayoutAddress(workerID string) string {
 	var addr string
 	var seen int64
 	if err := db.QueryRow(`SELECT payout_address, seen_at FROM worker_payout_lock WHERE worker_id=?`, workerID).Scan(&addr, &seen); err != nil {
+		if err != sql.ErrNoRows {
+			// Fail closed: a broken durable store must not read as "no binding",
+			// or identity checks would accept a different payout address.
+			log.Printf("payout lock lookup failed: worker_id=%q err=%v", workerID, err)
+			return payoutLockLookupFailed
+		}
 		return ""
 	}
 	addr = strings.TrimSpace(addr)
@@ -318,20 +342,31 @@ func (m *workManager) lockedPayoutAddress(workerID string) string {
 		m.worker[workerID] = st
 	}
 	m.mu.Unlock()
+	// First read of a binding that fell out of the warm cache refreshes its
+	// liveness right away (UPDATE-only; cannot resurrect anything).
+	if terr := m.touchPayoutLockSeenAt(workerID); terr != nil {
+		log.Printf("payout lock touch failed: worker_id=%q err=%v", workerID, terr)
+	}
 	return addr
 }
+
+// payoutLockLookupFailed is returned by lockedPayoutAddress when the durable
+// store errors: callers treat any non-empty value as "bound to this address",
+// so this sentinel fails identity checks closed during a durable-store outage.
+const payoutLockLookupFailed = "payout-lock-lookup-failed" // real addresses start with HMC- and hex, so this can never collide
 
 // persistPayoutLock records the first payout address for a worker_id. A later
 // different address does not replace it.
 // touchPayoutLockSeenAt refreshes liveness for an existing binding only: an
 // UPDATE can never resurrect a row an in-flight admin unbind just deleted
 // (an INSERT-upsert here would race the DELETE and silently undo the unbind).
-func (m *workManager) touchPayoutLockSeenAt(workerID string) {
+func (m *workManager) touchPayoutLockSeenAt(workerID string) error {
 	if m == nil || m.dedupDB == nil || workerID == "" {
-		return
+		return errors.New("payout lock touch: no durable store")
 	}
-	_, _ = m.dedupDB.Exec(`UPDATE worker_payout_lock SET seen_at=? WHERE worker_id=?`,
+	_, err := m.dedupDB.Exec(`UPDATE worker_payout_lock SET seen_at=? WHERE worker_id=?`,
 		time.Now().Unix(), workerID)
+	return err
 }
 
 func (m *workManager) persistPayoutLock(workerID, addr string) {
@@ -344,10 +379,14 @@ func (m *workManager) persistPayoutLock(workerID, addr string) {
 		return
 	}
 	// First payout address stays bound (report #27); only liveness refreshes.
+	// payoutLockMu serializes this write against clearPayoutLock so a claim
+	// cannot re-insert a binding an admin unbind just deleted.
+	m.payoutLockMu.Lock()
 	_, _ = m.dedupDB.Exec(
 		`INSERT INTO worker_payout_lock(worker_id, payout_address, seen_at) VALUES(?,?,?)
 		 ON CONFLICT(worker_id) DO UPDATE SET seen_at=excluded.seen_at`,
 		workerID, addr, time.Now().Unix())
+	m.payoutLockMu.Unlock()
 }
 
 // clearPayoutLock removes the durable + in-memory payout binding for worker_id
@@ -364,29 +403,49 @@ func (m *workManager) clearPayoutLock(workerID string) (cleared bool, prevAddr s
 		return false, "", nil
 	}
 	prevAddr = m.lockedPayoutAddress(workerID)
+	if prevAddr == payoutLockLookupFailed {
+		prevAddr = ""
+	}
 	m.mu.Lock()
 	db := m.dedupDB
 	m.mu.Unlock()
 	if db != nil {
+		// payoutLockMu covers DELETE + memory clear together so an in-flight
+		// claim persist cannot land between them and re-insert the binding.
+		m.payoutLockMu.Lock()
 		res, derr := db.Exec(`DELETE FROM worker_payout_lock WHERE worker_id=?`, workerID)
+		if derr == nil {
+			m.mu.Lock()
+			if m.worker != nil {
+				st := m.worker[workerID]
+				if strings.TrimSpace(st.PayoutAddress) != "" {
+					st.PayoutAddress = ""
+					m.worker[workerID] = st
+					cleared = true
+				}
+			}
+			m.mu.Unlock()
+			if n, _ := res.RowsAffected(); n > 0 {
+				cleared = true
+			}
+		}
+		m.payoutLockMu.Unlock()
 		if derr != nil {
-			log.Printf("payout lock unbind failed: worker_id=%s err=%v", workerID, derr)
+			log.Printf("payout lock unbind failed: worker_id=%q err=%v", workerID, derr)
 			return false, prevAddr, errors.New("durable payout-lock delete failed")
 		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			cleared = true
+	} else {
+		m.mu.Lock()
+		if m.worker != nil {
+			st := m.worker[workerID]
+			if strings.TrimSpace(st.PayoutAddress) != "" {
+				st.PayoutAddress = ""
+				m.worker[workerID] = st
+				cleared = true
+			}
 		}
+		m.mu.Unlock()
 	}
-	m.mu.Lock()
-	if m.worker != nil {
-		st := m.worker[workerID]
-		if strings.TrimSpace(st.PayoutAddress) != "" {
-			st.PayoutAddress = ""
-			m.worker[workerID] = st
-			cleared = true
-		}
-	}
-	m.mu.Unlock()
 	if prevAddr == "" && !cleared {
 		return false, "", nil
 	}
